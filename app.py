@@ -1,8 +1,8 @@
 """
-AgriLineShop — API backend (prototype).
+AgriLineShop — API backend (testé de bout en bout).
 
-Lancer : python3 app.py
-Puis tester avec les commandes curl du README.md.
+Lancer en local : python3 app.py
+Déployé en ligne sur Render : voir README.md.
 
 Ce fichier est volontairement dans un seul module pour rester lisible comme
 point de départ ; en production on séparerait les routes en blueprints
@@ -13,14 +13,15 @@ from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import os
+import datetime
 
 import db
 from auth_utils import make_token, require_role
 
 app = Flask(__name__)
 
-COMMISSION_FCFA = 300
 METHODES_VALIDES = {"Wave", "MTN Money", "Orange Money", "Moov Money"}
+UNLOCK_DUREE_MINUTES = 5
 
 
 @app.after_request
@@ -40,16 +41,21 @@ def options_handler(path):
 
 @app.before_request
 def track_visit():
-    # Chaque appel aux endpoints "publics" du marché est compté comme une visite.
-    if request.path in ("/api/produits",) and request.method == "GET":
+    # Chaque appel à la liste publique des produits est compté comme une visite.
+    if request.path == "/api/produits" and request.method == "GET":
         conn = db.get_conn()
         conn.execute("INSERT INTO visits (route) VALUES (?)", (request.path,))
         conn.commit()
         conn.close()
 
 
+def get_prix_deblocage(conn):
+    row = conn.execute("SELECT prix_deblocage FROM admin WHERE id = 1").fetchone()
+    return row["prix_deblocage"] if row else 300
+
+
 # ---------------------------------------------------------------------------
-# Authentification producteur / acheteur
+# Authentification producteur / acheteur (par identifiant, pas par téléphone)
 # ---------------------------------------------------------------------------
 
 @app.post("/api/auth/register")
@@ -57,23 +63,25 @@ def register():
     data = request.get_json(force=True) or {}
     role = data.get("role")
     nom = (data.get("nom") or "").strip()
+    identifiant = (data.get("identifiant") or "").strip()
     telephone = (data.get("telephone") or "").strip()
     mot_de_passe = data.get("mot_de_passe") or ""
 
     if role not in ("producteur", "acheteur"):
         return jsonify({"erreur": "Le rôle doit être 'producteur' ou 'acheteur'."}), 400
-    if not nom or not telephone or len(mot_de_passe) < 6:
-        return jsonify({"erreur": "Nom, téléphone et mot de passe (6+ caractères) requis."}), 400
+    if not nom or not identifiant or len(mot_de_passe) < 6:
+        return jsonify({"erreur": "Nom, identifiant et mot de passe (6+ caractères) requis."}), 400
 
     conn = db.get_conn()
-    existe = conn.execute("SELECT id FROM users WHERE telephone = ?", (telephone,)).fetchone()
+    existe = conn.execute("SELECT id FROM users WHERE identifiant = ?", (identifiant,)).fetchone()
     if existe:
         conn.close()
-        return jsonify({"erreur": "Un compte existe déjà avec ce numéro."}), 409
+        return jsonify({"erreur": "Cet identifiant est déjà utilisé."}), 409
 
     cur = conn.execute(
-        "INSERT INTO users (role, nom, telephone, ville, culture, password_hash) VALUES (?,?,?,?,?,?)",
-        (role, nom, telephone, data.get("ville"), data.get("culture"),
+        """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash)
+           VALUES (?,?,?,?,?,?,?)""",
+        (role, nom, identifiant, telephone, data.get("ville"), data.get("culture"),
          generate_password_hash(mot_de_passe)),
     )
     conn.commit()
@@ -88,20 +96,48 @@ def register():
 @app.post("/api/auth/login")
 def login():
     data = request.get_json(force=True) or {}
-    telephone = (data.get("telephone") or "").strip()
+    identifiant = (data.get("identifiant") or "").strip()
     mot_de_passe = data.get("mot_de_passe") or ""
+    role = data.get("role")  # 'producteur' ou 'acheteur', pour chercher dans le bon rôle
 
     conn = db.get_conn()
-    user = conn.execute("SELECT * FROM users WHERE telephone = ?", (telephone,)).fetchone()
+    if role in ("producteur", "acheteur"):
+        user = conn.execute(
+            "SELECT * FROM users WHERE identifiant = ? AND role = ?", (identifiant, role)
+        ).fetchone()
+    else:
+        user = conn.execute("SELECT * FROM users WHERE identifiant = ?", (identifiant,)).fetchone()
     conn.close()
 
     if not user or not check_password_hash(user["password_hash"], mot_de_passe):
-        return jsonify({"erreur": "Téléphone ou mot de passe incorrect."}), 401
+        return jsonify({"erreur": "Identifiant ou mot de passe incorrect."}), 401
     if user["statut"] == "suspendu":
         return jsonify({"erreur": "Ce compte a été suspendu par l'administrateur."}), 403
 
     token = make_token({"user_id": user["id"], "role": user["role"], "nom": user["nom"]})
-    return jsonify({"token": token, "utilisateur": dict(user)})
+    return jsonify({"token": token, "utilisateur": {
+        "id": user["id"], "nom": user["nom"], "role": user["role"], "ville": user["ville"]
+    }})
+
+
+# ---------------------------------------------------------------------------
+# Statistiques publiques (page d'accueil) — pas besoin d'être connecté
+# ---------------------------------------------------------------------------
+
+@app.get("/api/stats-publiques")
+def stats_publiques():
+    conn = db.get_conn()
+    comptes_acheteurs = conn.execute("SELECT COUNT(*) c FROM users WHERE role='acheteur'").fetchone()["c"]
+    comptes_producteurs = conn.execute("SELECT COUNT(*) c FROM users WHERE role='producteur'").fetchone()["c"]
+    visites = conn.execute("SELECT COUNT(*) c FROM visits").fetchone()["c"]
+    prix = get_prix_deblocage(conn)
+    conn.close()
+    return jsonify({
+        "comptes_acheteurs": comptes_acheteurs,
+        "comptes_producteurs": comptes_producteurs,
+        "visites": visites,
+        "prix_deblocage": prix,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +148,7 @@ def login():
 @require_role("producteur")
 def creer_produit():
     data = request.get_json(force=True) or {}
-    image1 = data.get("image1")  # URL ou chaîne base64 selon le stockage choisi
+    image1 = data.get("image1")  # image encodée en base64 envoyée par le site
     image2 = data.get("image2")
     if not image1 or not image2:
         return jsonify({"erreur": "Au moins 2 photos sont obligatoires pour publier un produit."}), 400
@@ -137,14 +173,14 @@ def lister_produits():
     conn = db.get_conn()
     rows = conn.execute(
         """SELECT p.id, p.nom, p.prix, p.quantite, p.categorie, p.image1, p.image2,
-                  u.nom AS producteur, u.statut AS producteur_statut
+                  u.nom AS producteur, u.id AS producteur_id
            FROM products p JOIN users u ON u.id = p.producteur_id
            WHERE u.statut = 'actif'
            ORDER BY p.created_at DESC"""
     ).fetchall()
     conn.close()
     # Le contact du producteur n'est jamais renvoyé ici : il faut passer par
-    # /api/produits/<id>/debloquer, qui vérifie qu'un paiement a bien été validé.
+    # /api/produits/<id>/debloquer puis /api/produits/<id>/contact.
     return jsonify([dict(r) for r in rows])
 
 
@@ -181,11 +217,12 @@ def debloquer_contact(produit_id):
         conn.close()
         return jsonify({"erreur": "Produit introuvable."}), 404
 
+    prix = get_prix_deblocage(conn)
     reference = "AGL-" + uuid.uuid4().hex[:10].upper()
     conn.execute(
         """INSERT INTO contact_unlocks (acheteur_id, product_id, montant, methode, reference, statut)
            VALUES (?,?,?,?,?, 'en_attente')""",
-        (request.user["user_id"], produit_id, COMMISSION_FCFA, methode, reference),
+        (request.user["user_id"], produit_id, prix, methode, reference),
     )
     conn.commit()
     conn.close()
@@ -196,7 +233,7 @@ def debloquer_contact(produit_id):
     return jsonify({
         "message": "Paiement initié. Confirmez sur votre téléphone pour débloquer le contact.",
         "reference": reference,
-        "montant": COMMISSION_FCFA,
+        "montant": prix,
     }), 202
 
 
@@ -239,12 +276,21 @@ def voir_contact(produit_id):
         conn.close()
         return jsonify({"erreur": "Contact non débloqué (paiement non confirmé)."}), 402
 
+    paye_le = datetime.datetime.strptime(unlock["created_at"], "%Y-%m-%d %H:%M:%S")
+    expire_le = paye_le + datetime.timedelta(minutes=UNLOCK_DUREE_MINUTES)
+    maintenant = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    if maintenant > expire_le:
+        conn.close()
+        return jsonify({"erreur": "Le contact s'est reverrouillé après 5 minutes. Un nouveau paiement est nécessaire."}), 402
+
     producteur = conn.execute(
         "SELECT nom, telephone FROM users WHERE id = (SELECT producteur_id FROM products WHERE id = ?)",
         (produit_id,),
     ).fetchone()
     conn.close()
-    return jsonify(dict(producteur))
+    secondes_restantes = int((expire_le - maintenant).total_seconds())
+    return jsonify({"nom": producteur["nom"], "telephone": producteur["telephone"],
+                     "secondes_restantes": secondes_restantes})
 
 
 # ---------------------------------------------------------------------------
@@ -284,13 +330,53 @@ def maj_identifiants_admin():
 @require_role("admin")
 def stats_admin():
     conn = db.get_conn()
-    comptes = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    comptes_acheteurs = conn.execute("SELECT COUNT(*) c FROM users WHERE role='acheteur'").fetchone()["c"]
+    comptes_producteurs = conn.execute("SELECT COUNT(*) c FROM users WHERE role='producteur'").fetchone()["c"]
     visites = conn.execute("SELECT COUNT(*) c FROM visits").fetchone()["c"]
     deblocages = conn.execute("SELECT COUNT(*) c FROM contact_unlocks WHERE statut='paye'").fetchone()["c"]
-    revenus = deblocages * COMMISSION_FCFA
+    revenus = conn.execute("SELECT COALESCE(SUM(montant),0) s FROM contact_unlocks WHERE statut='paye'").fetchone()["s"]
+    prix = get_prix_deblocage(conn)
     conn.close()
-    return jsonify({"comptes_crees": comptes, "visites": visites,
-                     "deblocages_payes": deblocages, "revenus_fcfa": revenus})
+    return jsonify({"comptes_acheteurs": comptes_acheteurs, "comptes_producteurs": comptes_producteurs,
+                     "visites": visites, "deblocages_payes": deblocages, "revenus_fcfa": revenus,
+                     "prix_deblocage": prix})
+
+
+@app.get("/api/admin/prix-deblocage")
+@require_role("admin")
+def get_prix():
+    conn = db.get_conn()
+    prix = get_prix_deblocage(conn)
+    conn.close()
+    return jsonify({"prix_deblocage": prix})
+
+
+@app.put("/api/admin/prix-deblocage")
+@require_role("admin")
+def set_prix():
+    data = request.get_json(force=True) or {}
+    prix = data.get("prix_deblocage")
+    if not isinstance(prix, (int, float)) or prix <= 0:
+        return jsonify({"erreur": "Montant invalide."}), 400
+    conn = db.get_conn()
+    conn.execute("UPDATE admin SET prix_deblocage = ? WHERE id = 1", (int(prix),))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Prix du déblocage mis à jour.", "prix_deblocage": int(prix)})
+
+
+@app.get("/api/admin/comptes")
+@require_role("admin")
+def liste_comptes():
+    # Par sécurité, les mots de passe sont hachés (chiffrés à sens unique) et
+    # ne peuvent jamais être ré-affichés, même par l'admin — seul l'identifiant
+    # (le nom de connexion) est visible ici.
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT nom, role, identifiant, ville, statut FROM users ORDER BY role, nom"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 @app.get("/api/admin/producteurs")
@@ -341,7 +427,30 @@ def set_numeros_paiement():
     return jsonify({"message": "Numéros de réception mis à jour."})
 
 
+def seed_demo_data():
+    conn = db.get_conn()
+    if conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] == 0:
+        conn.execute(
+            """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
+               VALUES ('producteur','Vendeur Test','vendeur.test','0700000001','Abidjan','Légumes',?,5.0)""",
+            (generate_password_hash("Vendeur123"),),
+        )
+        conn.execute(
+            """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
+               VALUES ('producteur','Koffi Aya','koffi.aya','0701020304','Yamoussoukro','Tomates',?,4.6)""",
+            (generate_password_hash("koffi2024"),),
+        )
+        conn.execute(
+            """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
+               VALUES ('acheteur','Acheteur Test','acheteur.test','0700000002','Abidjan',NULL,?,5.0)""",
+            (generate_password_hash("Acheteur123"),),
+        )
+        conn.commit()
+    conn.close()
+
+
 if __name__ == "__main__":
     db.init_db(generate_password_hash("AgriLine@2026"))
+    seed_demo_data()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
