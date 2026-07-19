@@ -34,6 +34,15 @@ def add_cors_headers(response):
     return response
 
 
+@app.get("/")
+def accueil_api():
+    return jsonify({
+        "message": "L'API AgriLineShop fonctionne normalement.",
+        "info": "Cette adresse sert de serveur pour le site — le site lui-même est sur agrilineshop.netlify.app",
+        "exemple": "/api/produits"
+    })
+
+
 @app.route("/<path:path>", methods=["OPTIONS"])
 def options_handler(path):
     return "", 204

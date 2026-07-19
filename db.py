@@ -73,8 +73,36 @@ def get_conn():
     return conn
 
 
+def _column_exists(conn, table, column):
+    cols = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    return column in cols
+
+
 def init_db(default_admin_hash):
     conn = get_conn()
+
+    # Migration défensive : si une version précédente de la base existe déjà
+    # (sans les colonnes récentes), on la recrée proprement plutôt que de
+    # planter au premier appel. Sans conséquence tant qu'aucune vraie donnée
+    # de production ne s'est encore accumulée.
+    for table in ("users", "admin"):
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if exists:
+            needs_migration = (
+                (table == "users" and not _column_exists(conn, "users", "identifiant"))
+                or (table == "admin" and not _column_exists(conn, "admin", "prix_deblocage"))
+            )
+            if needs_migration and table == "users":
+                # products et contact_unlocks référencent users(id) : on les
+                # recrée aussi pour éviter des références orphelines.
+                conn.execute("DROP TABLE IF EXISTS contact_unlocks")
+                conn.execute("DROP TABLE IF EXISTS products")
+                conn.execute("DROP TABLE IF EXISTS users")
+            elif needs_migration:
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
+
     conn.executescript(SCHEMA)
     row = conn.execute("SELECT id FROM admin WHERE id = 1").fetchone()
     if row is None:
