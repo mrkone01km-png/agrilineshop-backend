@@ -99,7 +99,8 @@ def register():
 
     token = make_token({"user_id": user_id, "role": role, "nom": nom})
     return jsonify({"message": "Compte créé.", "token": token,
-                     "utilisateur": {"id": user_id, "role": role, "nom": nom}}), 201
+                     "utilisateur": {"id": user_id, "role": role, "nom": nom, "identifiant": identifiant,
+                                      "telephone": telephone, "ville": data.get("ville"), "culture": data.get("culture")}}), 201
 
 
 @app.post("/api/auth/login")
@@ -125,7 +126,8 @@ def login():
 
     token = make_token({"user_id": user["id"], "role": user["role"], "nom": user["nom"]})
     return jsonify({"token": token, "utilisateur": {
-        "id": user["id"], "nom": user["nom"], "role": user["role"], "ville": user["ville"]
+        "id": user["id"], "nom": user["nom"], "role": user["role"], "ville": user["ville"],
+        "identifiant": user["identifiant"], "telephone": user["telephone"], "culture": user["culture"]
     }})
 
 
@@ -179,14 +181,25 @@ def creer_produit():
 
 @app.get("/api/produits")
 def lister_produits():
+    categorie = request.args.get("categorie", "").strip()
+    ville = request.args.get("ville", "").strip()
+
+    sql = """SELECT p.id, p.nom, p.prix, p.quantite, p.categorie, p.image1, p.image2,
+                    u.nom AS producteur, u.id AS producteur_id, u.ville AS producteur_ville,
+                    COALESCE((SELECT ROUND(AVG(a.note), 1) FROM avis a WHERE a.producteur_id = u.id), u.note) AS producteur_note
+             FROM products p JOIN users u ON u.id = p.producteur_id
+             WHERE u.statut = 'actif'"""
+    params = []
+    if categorie:
+        sql += " AND p.categorie = ?"
+        params.append(categorie)
+    if ville:
+        sql += " AND u.ville LIKE ?"
+        params.append(f"%{ville}%")
+    sql += " ORDER BY p.created_at DESC"
+
     conn = db.get_conn()
-    rows = conn.execute(
-        """SELECT p.id, p.nom, p.prix, p.quantite, p.categorie, p.image1, p.image2,
-                  u.nom AS producteur, u.id AS producteur_id
-           FROM products p JOIN users u ON u.id = p.producteur_id
-           WHERE u.statut = 'actif'
-           ORDER BY p.created_at DESC"""
-    ).fetchall()
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     # Le contact du producteur n'est jamais renvoyé ici : il faut passer par
     # /api/produits/<id>/debloquer puis /api/produits/<id>/contact.
@@ -203,6 +216,56 @@ def mes_produits():
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+@app.put("/api/produits/<int:produit_id>")
+@require_role("producteur")
+def modifier_produit(produit_id):
+    conn = db.get_conn()
+    produit = conn.execute("SELECT * FROM products WHERE id = ?", (produit_id,)).fetchone()
+    if not produit:
+        conn.close()
+        return jsonify({"erreur": "Produit introuvable."}), 404
+    if produit["producteur_id"] != request.user["user_id"]:
+        conn.close()
+        return jsonify({"erreur": "Vous ne pouvez modifier que vos propres produits."}), 403
+
+    data = request.get_json(force=True) or {}
+    nom = data.get("nom") or produit["nom"]
+    prix = data.get("prix") or produit["prix"]
+    quantite = data.get("quantite", produit["quantite"])
+    categorie = data.get("categorie", produit["categorie"])
+    description = data.get("description", produit["description"])
+    image1 = data.get("image1") or produit["image1"]
+    image2 = data.get("image2") or produit["image2"]
+
+    conn.execute(
+        """UPDATE products SET nom=?, prix=?, quantite=?, categorie=?, description=?, image1=?, image2=?
+           WHERE id = ?""",
+        (nom, prix, quantite, categorie, description, image1, image2, produit_id),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Produit mis à jour."})
+
+
+@app.delete("/api/produits/<int:produit_id>")
+@require_role("producteur")
+def supprimer_produit(produit_id):
+    conn = db.get_conn()
+    produit = conn.execute("SELECT * FROM products WHERE id = ?", (produit_id,)).fetchone()
+    if not produit:
+        conn.close()
+        return jsonify({"erreur": "Produit introuvable."}), 404
+    if produit["producteur_id"] != request.user["user_id"]:
+        conn.close()
+        return jsonify({"erreur": "Vous ne pouvez supprimer que vos propres produits."}), 403
+
+    conn.execute("DELETE FROM contact_unlocks WHERE product_id = ?", (produit_id,))
+    conn.execute("DELETE FROM products WHERE id = ?", (produit_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Produit supprimé."})
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +366,103 @@ def voir_contact(produit_id):
 
 
 # ---------------------------------------------------------------------------
+# Avis (notes et commentaires laissés par les acheteurs sur les producteurs)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/producteurs/<int:producteur_id>/avis")
+@require_role("acheteur")
+def laisser_avis(producteur_id):
+    data = request.get_json(force=True) or {}
+    note = data.get("note")
+    commentaire = (data.get("commentaire") or "").strip()
+    if not isinstance(note, (int, float)) or note < 1 or note > 5:
+        return jsonify({"erreur": "La note doit être comprise entre 1 et 5."}), 400
+
+    conn = db.get_conn()
+    # Il faut avoir déjà débloqué (payé) le contact de ce producteur pour pouvoir le noter.
+    deja_client = conn.execute(
+        """SELECT 1 FROM contact_unlocks cu JOIN products pr ON pr.id = cu.product_id
+           WHERE cu.acheteur_id = ? AND pr.producteur_id = ? AND cu.statut = 'paye' LIMIT 1""",
+        (request.user["user_id"], producteur_id),
+    ).fetchone()
+    if not deja_client:
+        conn.close()
+        return jsonify({"erreur": "Vous devez avoir débloqué le contact de ce producteur pour pouvoir le noter."}), 403
+
+    conn.execute(
+        """INSERT INTO avis (acheteur_id, producteur_id, note, commentaire) VALUES (?,?,?,?)
+           ON CONFLICT(acheteur_id, producteur_id) DO UPDATE SET note=excluded.note, commentaire=excluded.commentaire""",
+        (request.user["user_id"], producteur_id, int(note), commentaire),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Avis enregistré, merci !"})
+
+
+@app.get("/api/producteurs/<int:producteur_id>/avis")
+def voir_avis(producteur_id):
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT a.note, a.commentaire, a.created_at, u.nom AS acheteur
+           FROM avis a JOIN users u ON u.id = a.acheteur_id
+           WHERE a.producteur_id = ? ORDER BY a.created_at DESC""",
+        (producteur_id,),
+    ).fetchall()
+    moyenne = conn.execute(
+        "SELECT ROUND(AVG(note),1) m, COUNT(*) n FROM avis WHERE producteur_id = ?", (producteur_id,)
+    ).fetchone()
+    conn.close()
+    return jsonify({"avis": [dict(r) for r in rows], "moyenne": moyenne["m"], "nombre": moyenne["n"]})
+
+
+# ---------------------------------------------------------------------------
+# Mon profil (producteur ou acheteur connecté)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/mon-profil")
+@require_role("producteur", "acheteur")
+def get_mon_profil():
+    conn = db.get_conn()
+    user = conn.execute("SELECT id, nom, identifiant, telephone, ville, culture, role FROM users WHERE id = ?",
+                         (request.user["user_id"],)).fetchone()
+    conn.close()
+    if not user:
+        return jsonify({"erreur": "Compte introuvable."}), 404
+    return jsonify(dict(user))
+
+
+@app.put("/api/mon-profil")
+@require_role("producteur", "acheteur")
+def maj_mon_profil():
+    data = request.get_json(force=True) or {}
+    nom = data.get("nom")
+    telephone = data.get("telephone")
+    ville = data.get("ville")
+    culture = data.get("culture")
+    nouveau_mdp = data.get("nouveau_mot_de_passe")
+
+    if not nom:
+        return jsonify({"erreur": "Le nom est obligatoire."}), 400
+    if nouveau_mdp and len(nouveau_mdp) < 6:
+        return jsonify({"erreur": "Le nouveau mot de passe doit contenir au moins 6 caractères."}), 400
+
+    conn = db.get_conn()
+    if nouveau_mdp:
+        conn.execute(
+            "UPDATE users SET nom=?, telephone=?, ville=?, culture=?, password_hash=? WHERE id=?",
+            (nom, telephone, ville, culture, generate_password_hash(nouveau_mdp), request.user["user_id"]),
+        )
+    else:
+        conn.execute(
+            "UPDATE users SET nom=?, telephone=?, ville=?, culture=? WHERE id=?",
+            (nom, telephone, ville, culture, request.user["user_id"]),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Profil mis à jour."})
+
+
+# ---------------------------------------------------------------------------
 # Administration
 # ---------------------------------------------------------------------------
 
@@ -393,7 +553,9 @@ def liste_comptes():
 def liste_producteurs():
     conn = db.get_conn()
     rows = conn.execute(
-        "SELECT id, nom, ville, note, statut FROM users WHERE role='producteur' ORDER BY nom"
+        """SELECT u.id, u.nom, u.ville, u.statut,
+                  COALESCE((SELECT ROUND(AVG(a.note),1) FROM avis a WHERE a.producteur_id = u.id), u.note) AS note
+           FROM users u WHERE u.role='producteur' ORDER BY u.nom"""
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
