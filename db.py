@@ -53,16 +53,6 @@ CREATE TABLE IF NOT EXISTS visits (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS avis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    acheteur_id INTEGER NOT NULL REFERENCES users(id),
-    producteur_id INTEGER NOT NULL REFERENCES users(id),
-    note INTEGER NOT NULL CHECK(note BETWEEN 1 AND 5),
-    commentaire TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(acheteur_id, producteur_id)
-);
-
 CREATE TABLE IF NOT EXISTS admin (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     identifiant TEXT NOT NULL,
@@ -105,9 +95,8 @@ def init_db(default_admin_hash):
                 or (table == "admin" and not _column_exists(conn, "admin", "prix_deblocage"))
             )
             if needs_migration and table == "users":
-                # products, contact_unlocks et avis référencent users(id) : on
-                # les recrée aussi pour éviter des références orphelines.
-                conn.execute("DROP TABLE IF EXISTS avis")
+                # products et contact_unlocks référencent users(id) : on les
+                # recrée aussi pour éviter des références orphelines.
                 conn.execute("DROP TABLE IF EXISTS contact_unlocks")
                 conn.execute("DROP TABLE IF EXISTS products")
                 conn.execute("DROP TABLE IF EXISTS users")
