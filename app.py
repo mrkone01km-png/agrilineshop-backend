@@ -53,7 +53,7 @@ def track_visit():
     # Chaque appel à la liste publique des produits est compté comme une visite.
     if request.path == "/api/produits" and request.method == "GET":
         conn = db.get_conn()
-        conn.execute("INSERT INTO visits (route) VALUES (?)", (request.path,))
+        conn.execute("INSERT INTO visits (route) VALUES (%s)", (request.path,))
         conn.commit()
         conn.close()
 
@@ -82,19 +82,19 @@ def register():
         return jsonify({"erreur": "Nom, identifiant et mot de passe (6+ caractères) requis."}), 400
 
     conn = db.get_conn()
-    existe = conn.execute("SELECT id FROM users WHERE identifiant = ?", (identifiant,)).fetchone()
+    existe = conn.execute("SELECT id FROM users WHERE identifiant = %s", (identifiant,)).fetchone()
     if existe:
         conn.close()
         return jsonify({"erreur": "Cet identifiant est déjà utilisé."}), 409
 
     cur = conn.execute(
         """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash)
-           VALUES (?,?,?,?,?,?,?)""",
+           VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (role, nom, identifiant, telephone, data.get("ville"), data.get("culture"),
          generate_password_hash(mot_de_passe)),
     )
+    user_id = cur.fetchone()["id"]
     conn.commit()
-    user_id = cur.lastrowid
     conn.close()
 
     token = make_token({"user_id": user_id, "role": role, "nom": nom})
@@ -113,10 +113,10 @@ def login():
     conn = db.get_conn()
     if role in ("producteur", "acheteur"):
         user = conn.execute(
-            "SELECT * FROM users WHERE identifiant = ? AND role = ?", (identifiant, role)
+            "SELECT * FROM users WHERE identifiant = %s AND role = %s", (identifiant, role)
         ).fetchone()
     else:
-        user = conn.execute("SELECT * FROM users WHERE identifiant = ?", (identifiant,)).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE identifiant = %s", (identifiant,)).fetchone()
     conn.close()
 
     if not user or not check_password_hash(user["password_hash"], mot_de_passe):
@@ -169,12 +169,12 @@ def creer_produit():
     conn = db.get_conn()
     cur = conn.execute(
         """INSERT INTO products (producteur_id, nom, prix, quantite, categorie, description, image1, image2)
-           VALUES (?,?,?,?,?,?,?,?)""",
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (request.user["user_id"], data["nom"], data["prix"], data.get("quantite"),
          data.get("categorie"), data.get("description"), image1, image2),
     )
+    produit_id = cur.fetchone()["id"]
     conn.commit()
-    produit_id = cur.lastrowid
     conn.close()
     return jsonify({"message": "Produit publié.", "id": produit_id}), 201
 
@@ -186,15 +186,15 @@ def lister_produits():
 
     sql = """SELECT p.id, p.nom, p.prix, p.quantite, p.categorie, p.image1, p.image2,
                     u.nom AS producteur, u.id AS producteur_id, u.ville AS producteur_ville,
-                    COALESCE((SELECT ROUND(AVG(a.note), 1) FROM avis a WHERE a.producteur_id = u.id), u.note) AS producteur_note
+                    COALESCE((SELECT ROUND(AVG(a.note)::numeric, 1) FROM avis a WHERE a.producteur_id = u.id), u.note::numeric) AS producteur_note
              FROM products p JOIN users u ON u.id = p.producteur_id
              WHERE u.statut = 'actif'"""
     params = []
     if categorie:
-        sql += " AND p.categorie = ?"
+        sql += " AND p.categorie = %s"
         params.append(categorie)
     if ville:
-        sql += " AND u.ville LIKE ?"
+        sql += " AND u.ville LIKE %s"
         params.append(f"%{ville}%")
     sql += " ORDER BY p.created_at DESC"
 
@@ -211,7 +211,7 @@ def lister_produits():
 def mes_produits():
     conn = db.get_conn()
     rows = conn.execute(
-        "SELECT * FROM products WHERE producteur_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM products WHERE producteur_id = %s ORDER BY created_at DESC",
         (request.user["user_id"],),
     ).fetchall()
     conn.close()
@@ -222,7 +222,7 @@ def mes_produits():
 @require_role("producteur")
 def modifier_produit(produit_id):
     conn = db.get_conn()
-    produit = conn.execute("SELECT * FROM products WHERE id = ?", (produit_id,)).fetchone()
+    produit = conn.execute("SELECT * FROM products WHERE id = %s", (produit_id,)).fetchone()
     if not produit:
         conn.close()
         return jsonify({"erreur": "Produit introuvable."}), 404
@@ -240,8 +240,8 @@ def modifier_produit(produit_id):
     image2 = data.get("image2") or produit["image2"]
 
     conn.execute(
-        """UPDATE products SET nom=?, prix=?, quantite=?, categorie=?, description=?, image1=?, image2=?
-           WHERE id = ?""",
+        """UPDATE products SET nom=%s, prix=%s, quantite=%s, categorie=%s, description=%s, image1=%s, image2=%s
+           WHERE id = %s""",
         (nom, prix, quantite, categorie, description, image1, image2, produit_id),
     )
     conn.commit()
@@ -253,7 +253,7 @@ def modifier_produit(produit_id):
 @require_role("producteur")
 def supprimer_produit(produit_id):
     conn = db.get_conn()
-    produit = conn.execute("SELECT * FROM products WHERE id = ?", (produit_id,)).fetchone()
+    produit = conn.execute("SELECT * FROM products WHERE id = %s", (produit_id,)).fetchone()
     if not produit:
         conn.close()
         return jsonify({"erreur": "Produit introuvable."}), 404
@@ -261,8 +261,8 @@ def supprimer_produit(produit_id):
         conn.close()
         return jsonify({"erreur": "Vous ne pouvez supprimer que vos propres produits."}), 403
 
-    conn.execute("DELETE FROM contact_unlocks WHERE product_id = ?", (produit_id,))
-    conn.execute("DELETE FROM products WHERE id = ?", (produit_id,))
+    conn.execute("DELETE FROM contact_unlocks WHERE product_id = %s", (produit_id,))
+    conn.execute("DELETE FROM products WHERE id = %s", (produit_id,))
     conn.commit()
     conn.close()
     return jsonify({"message": "Produit supprimé."})
@@ -284,7 +284,7 @@ def debloquer_contact(produit_id):
         return jsonify({"erreur": "Numéro de paiement requis."}), 400
 
     conn = db.get_conn()
-    produit = conn.execute("SELECT * FROM products WHERE id = ?", (produit_id,)).fetchone()
+    produit = conn.execute("SELECT * FROM products WHERE id = %s", (produit_id,)).fetchone()
     if not produit:
         conn.close()
         return jsonify({"erreur": "Produit introuvable."}), 404
@@ -293,7 +293,7 @@ def debloquer_contact(produit_id):
     reference = "AGL-" + uuid.uuid4().hex[:10].upper()
     conn.execute(
         """INSERT INTO contact_unlocks (acheteur_id, product_id, montant, methode, reference, statut)
-           VALUES (?,?,?,?,?, 'en_attente')""",
+           VALUES (%s,%s,%s,%s,%s, 'en_attente')""",
         (request.user["user_id"], produit_id, prix, methode, reference),
     )
     conn.commit()
@@ -324,12 +324,12 @@ def webhook_paiement():
         return jsonify({"erreur": "Statut invalide."}), 400
 
     conn = db.get_conn()
-    unlock = conn.execute("SELECT * FROM contact_unlocks WHERE reference = ?", (reference,)).fetchone()
+    unlock = conn.execute("SELECT * FROM contact_unlocks WHERE reference = %s", (reference,)).fetchone()
     if not unlock:
         conn.close()
         return jsonify({"erreur": "Référence inconnue."}), 404
 
-    conn.execute("UPDATE contact_unlocks SET statut = ? WHERE reference = ?", (statut, reference))
+    conn.execute("UPDATE contact_unlocks SET statut = %s WHERE reference = %s", (statut, reference))
     conn.commit()
     conn.close()
     return jsonify({"message": "Statut mis à jour."})
@@ -340,7 +340,7 @@ def webhook_paiement():
 def voir_contact(produit_id):
     conn = db.get_conn()
     unlock = conn.execute(
-        """SELECT * FROM contact_unlocks WHERE product_id = ? AND acheteur_id = ? AND statut = 'paye'
+        """SELECT * FROM contact_unlocks WHERE product_id = %s AND acheteur_id = %s AND statut = 'paye'
            ORDER BY created_at DESC LIMIT 1""",
         (produit_id, request.user["user_id"]),
     ).fetchone()
@@ -348,15 +348,19 @@ def voir_contact(produit_id):
         conn.close()
         return jsonify({"erreur": "Contact non débloqué (paiement non confirmé)."}), 402
 
-    paye_le = datetime.datetime.strptime(unlock["created_at"], "%Y-%m-%d %H:%M:%S")
+    paye_le = unlock["created_at"]
+    if isinstance(paye_le, str):
+        paye_le = datetime.datetime.strptime(paye_le, "%Y-%m-%d %H:%M:%S")
+    if paye_le.tzinfo is None:
+        paye_le = paye_le.replace(tzinfo=datetime.timezone.utc)
     expire_le = paye_le + datetime.timedelta(minutes=UNLOCK_DUREE_MINUTES)
-    maintenant = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    maintenant = datetime.datetime.now(datetime.timezone.utc)
     if maintenant > expire_le:
         conn.close()
         return jsonify({"erreur": "Le contact s'est reverrouillé après 5 minutes. Un nouveau paiement est nécessaire."}), 402
 
     producteur = conn.execute(
-        "SELECT nom, telephone FROM users WHERE id = (SELECT producteur_id FROM products WHERE id = ?)",
+        "SELECT nom, telephone FROM users WHERE id = (SELECT producteur_id FROM products WHERE id = %s)",
         (produit_id,),
     ).fetchone()
     conn.close()
@@ -382,7 +386,7 @@ def laisser_avis(producteur_id):
     # Il faut avoir déjà débloqué (payé) le contact de ce producteur pour pouvoir le noter.
     deja_client = conn.execute(
         """SELECT 1 FROM contact_unlocks cu JOIN products pr ON pr.id = cu.product_id
-           WHERE cu.acheteur_id = ? AND pr.producteur_id = ? AND cu.statut = 'paye' LIMIT 1""",
+           WHERE cu.acheteur_id = %s AND pr.producteur_id = %s AND cu.statut = 'paye' LIMIT 1""",
         (request.user["user_id"], producteur_id),
     ).fetchone()
     if not deja_client:
@@ -390,7 +394,7 @@ def laisser_avis(producteur_id):
         return jsonify({"erreur": "Vous devez avoir débloqué le contact de ce producteur pour pouvoir le noter."}), 403
 
     conn.execute(
-        """INSERT INTO avis (acheteur_id, producteur_id, note, commentaire) VALUES (?,?,?,?)
+        """INSERT INTO avis (acheteur_id, producteur_id, note, commentaire) VALUES (%s,%s,%s,%s)
            ON CONFLICT(acheteur_id, producteur_id) DO UPDATE SET note=excluded.note, commentaire=excluded.commentaire""",
         (request.user["user_id"], producteur_id, int(note), commentaire),
     )
@@ -405,11 +409,11 @@ def voir_avis(producteur_id):
     rows = conn.execute(
         """SELECT a.note, a.commentaire, a.created_at, u.nom AS acheteur
            FROM avis a JOIN users u ON u.id = a.acheteur_id
-           WHERE a.producteur_id = ? ORDER BY a.created_at DESC""",
+           WHERE a.producteur_id = %s ORDER BY a.created_at DESC""",
         (producteur_id,),
     ).fetchall()
     moyenne = conn.execute(
-        "SELECT ROUND(AVG(note),1) m, COUNT(*) n FROM avis WHERE producteur_id = ?", (producteur_id,)
+        "SELECT ROUND(AVG(note)::numeric,1) m, COUNT(*) n FROM avis WHERE producteur_id = %s", (producteur_id,)
     ).fetchone()
     conn.close()
     return jsonify({"avis": [dict(r) for r in rows], "moyenne": moyenne["m"], "nombre": moyenne["n"]})
@@ -423,7 +427,7 @@ def voir_avis(producteur_id):
 @require_role("producteur", "acheteur")
 def get_mon_profil():
     conn = db.get_conn()
-    user = conn.execute("SELECT id, nom, identifiant, telephone, ville, culture, role FROM users WHERE id = ?",
+    user = conn.execute("SELECT id, nom, identifiant, telephone, ville, culture, role FROM users WHERE id = %s",
                          (request.user["user_id"],)).fetchone()
     conn.close()
     if not user:
@@ -449,12 +453,12 @@ def maj_mon_profil():
     conn = db.get_conn()
     if nouveau_mdp:
         conn.execute(
-            "UPDATE users SET nom=?, telephone=?, ville=?, culture=?, password_hash=? WHERE id=?",
+            "UPDATE users SET nom=%s, telephone=%s, ville=%s, culture=%s, password_hash=%s WHERE id=%s",
             (nom, telephone, ville, culture, generate_password_hash(nouveau_mdp), request.user["user_id"]),
         )
     else:
         conn.execute(
-            "UPDATE users SET nom=?, telephone=?, ville=?, culture=? WHERE id=?",
+            "UPDATE users SET nom=%s, telephone=%s, ville=%s, culture=%s WHERE id=%s",
             (nom, telephone, ville, culture, request.user["user_id"]),
         )
     conn.commit()
@@ -488,7 +492,7 @@ def maj_identifiants_admin():
     if not nouvel_id or not nouveau_mdp or len(nouveau_mdp) < 8:
         return jsonify({"erreur": "Identifiant et mot de passe (8+ caractères) requis."}), 400
     conn = db.get_conn()
-    conn.execute("UPDATE admin SET identifiant = ?, password_hash = ? WHERE id = 1",
+    conn.execute("UPDATE admin SET identifiant = %s, password_hash = %s WHERE id = 1",
                  (nouvel_id, generate_password_hash(nouveau_mdp)))
     conn.commit()
     conn.close()
@@ -528,7 +532,7 @@ def set_prix():
     if not isinstance(prix, (int, float)) or prix <= 0:
         return jsonify({"erreur": "Montant invalide."}), 400
     conn = db.get_conn()
-    conn.execute("UPDATE admin SET prix_deblocage = ? WHERE id = 1", (int(prix),))
+    conn.execute("UPDATE admin SET prix_deblocage = %s WHERE id = 1", (int(prix),))
     conn.commit()
     conn.close()
     return jsonify({"message": "Prix du déblocage mis à jour.", "prix_deblocage": int(prix)})
@@ -554,7 +558,7 @@ def liste_producteurs():
     conn = db.get_conn()
     rows = conn.execute(
         """SELECT u.id, u.nom, u.ville, u.statut,
-                  COALESCE((SELECT ROUND(AVG(a.note),1) FROM avis a WHERE a.producteur_id = u.id), u.note) AS note
+                  COALESCE((SELECT ROUND(AVG(a.note)::numeric,1) FROM avis a WHERE a.producteur_id = u.id), u.note::numeric) AS note
            FROM users u WHERE u.role='producteur' ORDER BY u.nom"""
     ).fetchall()
     conn.close()
@@ -569,7 +573,7 @@ def changer_statut_producteur(user_id):
     if statut not in ("actif", "suspendu"):
         return jsonify({"erreur": "Statut invalide ('actif' ou 'suspendu')."}), 400
     conn = db.get_conn()
-    conn.execute("UPDATE users SET statut = ? WHERE id = ? AND role = 'producteur'", (statut, user_id))
+    conn.execute("UPDATE users SET statut = %s WHERE id = %s AND role = 'producteur'", (statut, user_id))
     conn.commit()
     conn.close()
     return jsonify({"message": "Statut du producteur mis à jour."})
@@ -590,7 +594,7 @@ def set_numeros_paiement():
     data = request.get_json(force=True) or {}
     conn = db.get_conn()
     conn.execute(
-        "UPDATE admin SET wave_numero=?, mtn_numero=?, orange_numero=?, moov_numero=? WHERE id=1",
+        "UPDATE admin SET wave_numero=%s, mtn_numero=%s, orange_numero=%s, moov_numero=%s WHERE id=1",
         (data.get("wave", ""), data.get("mtn", ""), data.get("orange", ""), data.get("moov", "")),
     )
     conn.commit()
@@ -603,17 +607,17 @@ def seed_demo_data():
     if conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] == 0:
         conn.execute(
             """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
-               VALUES ('producteur','Vendeur Test','vendeur.test','0700000001','Abidjan','Légumes',?,5.0)""",
+               VALUES ('producteur','Vendeur Test','vendeur.test','0700000001','Abidjan','Légumes',%s,5.0)""",
             (generate_password_hash("Vendeur123"),),
         )
         conn.execute(
             """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
-               VALUES ('producteur','Koffi Aya','koffi.aya','0701020304','Yamoussoukro','Tomates',?,4.6)""",
+               VALUES ('producteur','Koffi Aya','koffi.aya','0701020304','Yamoussoukro','Tomates',%s,4.6)""",
             (generate_password_hash("koffi2024"),),
         )
         conn.execute(
             """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash, note)
-               VALUES ('acheteur','Acheteur Test','acheteur.test','0700000002','Abidjan',NULL,?,5.0)""",
+               VALUES ('acheteur','Acheteur Test','acheteur.test','0700000002','Abidjan',NULL,%s,5.0)""",
             (generate_password_hash("Acheteur123"),),
         )
         conn.commit()

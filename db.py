@@ -1,16 +1,24 @@
 """
-Couche d'accès à la base de données (SQLite).
-En production, on remplacerait SQLite par PostgreSQL/MySQL, mais le schéma
-et les requêtes ci-dessous restent quasiment identiques.
-"""
-import sqlite3
-import os
+Couche d'accès à la base de données — PostgreSQL (persistant), hébergée
+gratuitement sur Neon (neon.tech) ou tout autre fournisseur Postgres.
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "agrilineshop.db")
+Important : Render (le serveur qui fait tourner ce backend) a un disque
+"éphémère" sur son offre gratuite — tout fichier écrit localement (comme
+l'ancienne base SQLite) est effacé à chaque redémarrage. PostgreSQL, lui,
+vit ailleurs (chez Neon), donc les données survivent aux redémarrages.
+
+La variable d'environnement DATABASE_URL (fournie par Neon) doit être
+renseignée dans les réglages "Environment" de Render.
+"""
+import os
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     role TEXT NOT NULL CHECK(role IN ('producteur','acheteur')),
     nom TEXT NOT NULL,
     identifiant TEXT NOT NULL UNIQUE,
@@ -20,11 +28,11 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     note REAL DEFAULT 5.0,
     statut TEXT NOT NULL DEFAULT 'actif' CHECK(statut IN ('actif','suspendu')),
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     producteur_id INTEGER NOT NULL REFERENCES users(id),
     nom TEXT NOT NULL,
     prix INTEGER NOT NULL,
@@ -33,33 +41,33 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     image1 TEXT NOT NULL,
     image2 TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS contact_unlocks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     acheteur_id INTEGER NOT NULL REFERENCES users(id),
     product_id INTEGER NOT NULL REFERENCES products(id),
     montant INTEGER NOT NULL DEFAULT 300,
     methode TEXT NOT NULL CHECK(methode IN ('Wave','MTN Money','Orange Money','Moov Money')),
     reference TEXT NOT NULL UNIQUE,
     statut TEXT NOT NULL DEFAULT 'en_attente' CHECK(statut IN ('en_attente','paye','echoue')),
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS visits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     route TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS avis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     acheteur_id INTEGER NOT NULL REFERENCES users(id),
     producteur_id INTEGER NOT NULL REFERENCES users(id),
     note INTEGER NOT NULL CHECK(note BETWEEN 1 AND 5),
     commentaire TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(acheteur_id, producteur_id)
 );
 
@@ -76,49 +84,51 @@ CREATE TABLE IF NOT EXISTS admin (
 """
 
 
+class PGConnection:
+    """
+    Enveloppe une connexion psycopg2 pour garder, dans le reste du code,
+    la même façon d'écrire qu'avec sqlite3 : conn.execute(sql, params)
+    renvoie directement un curseur sur lequel on peut faire .fetchone()
+    ou .fetchall(), et les lignes se comportent comme des dictionnaires.
+    """
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def execute(self, sql, params=None):
+        cur = self._raw.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(sql, params if params is not None else ())
+        return cur
+
+    def executescript(self, sql):
+        cur = self._raw.cursor()
+        cur.execute(sql)
+        cur.close()
+
+    def commit(self):
+        self._raw.commit()
+
+    def close(self):
+        self._raw.close()
+
+
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-def _column_exists(conn, table, column):
-    cols = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-    return column in cols
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL n'est pas configurée. Ajoute-la dans Render, "
+            "Environment, avec la chaîne de connexion fournie par Neon."
+        )
+    raw = psycopg2.connect(DATABASE_URL)
+    return PGConnection(raw)
 
 
 def init_db(default_admin_hash):
     conn = get_conn()
-
-    # Migration défensive : si une version précédente de la base existe déjà
-    # (sans les colonnes récentes), on la recrée proprement plutôt que de
-    # planter au premier appel. Sans conséquence tant qu'aucune vraie donnée
-    # de production ne s'est encore accumulée.
-    for table in ("users", "admin"):
-        exists = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-        ).fetchone()
-        if exists:
-            needs_migration = (
-                (table == "users" and not _column_exists(conn, "users", "identifiant"))
-                or (table == "admin" and not _column_exists(conn, "admin", "prix_deblocage"))
-            )
-            if needs_migration and table == "users":
-                # products, contact_unlocks et avis référencent users(id) : on
-                # les recrée aussi pour éviter des références orphelines.
-                conn.execute("DROP TABLE IF EXISTS avis")
-                conn.execute("DROP TABLE IF EXISTS contact_unlocks")
-                conn.execute("DROP TABLE IF EXISTS products")
-                conn.execute("DROP TABLE IF EXISTS users")
-            elif needs_migration:
-                conn.execute(f"DROP TABLE IF EXISTS {table}")
-
     conn.executescript(SCHEMA)
     row = conn.execute("SELECT id FROM admin WHERE id = 1").fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO admin (id, identifiant, password_hash) VALUES (1, ?, ?)",
+            "INSERT INTO admin (id, identifiant, password_hash) VALUES (1, %s, %s)",
             ("admin", default_admin_hash),
         )
     conn.commit()
