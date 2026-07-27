@@ -28,6 +28,7 @@ SCHEMA_STATEMENTS = [
         nom TEXT NOT NULL,
         identifiant TEXT NOT NULL UNIQUE,
         telephone TEXT NOT NULL,
+        pays TEXT,
         ville TEXT,
         culture TEXT,
         password_hash TEXT NOT NULL,
@@ -80,6 +81,10 @@ SCHEMA_STATEMENTS = [
         mtn_numero TEXT DEFAULT '',
         orange_numero TEXT DEFAULT '',
         moov_numero TEXT DEFAULT ''
+    )""",
+    """CREATE TABLE IF NOT EXISTS prix_categories (
+        categorie TEXT PRIMARY KEY,
+        prix INTEGER NOT NULL
     )""",
 ]
 
@@ -153,6 +158,9 @@ def get_conn():
 def init_db(default_admin_hash):
     conn = get_conn()
     conn.executescript(SCHEMA_STATEMENTS)
+    # Migration douce (ne supprime jamais de données) pour les bases déjà
+    # créées avant l'ajout de la colonne "pays".
+    conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS pays TEXT"])
     row = conn.execute("SELECT id FROM admin WHERE id = 1").fetchone()
     if row is None:
         conn.execute(

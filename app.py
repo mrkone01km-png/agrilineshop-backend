@@ -63,6 +63,16 @@ def get_prix_deblocage(conn):
     return row["prix_deblocage"] if row else 300
 
 
+def get_prix_pour_categorie(conn, categorie):
+    """Renvoie le prix personnalisé de la catégorie (ex : cacao, café, coton...)
+    s'il existe, sinon le prix standard."""
+    if categorie:
+        row = conn.execute("SELECT prix FROM prix_categories WHERE categorie = %s", (categorie,)).fetchone()
+        if row:
+            return row["prix"]
+    return get_prix_deblocage(conn)
+
+
 # ---------------------------------------------------------------------------
 # Authentification producteur / acheteur (par identifiant, pas par téléphone)
 # ---------------------------------------------------------------------------
@@ -88,9 +98,9 @@ def register():
         return jsonify({"erreur": "Cet identifiant est déjà utilisé."}), 409
 
     cur = conn.execute(
-        """INSERT INTO users (role, nom, identifiant, telephone, ville, culture, password_hash)
-           VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (role, nom, identifiant, telephone, data.get("ville"), data.get("culture"),
+        """INSERT INTO users (role, nom, identifiant, telephone, pays, ville, culture, password_hash)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (role, nom, identifiant, telephone, data.get("pays"), data.get("ville"), data.get("culture"),
          generate_password_hash(mot_de_passe)),
     )
     user_id = cur.fetchone()["id"]
@@ -100,7 +110,8 @@ def register():
     token = make_token({"user_id": user_id, "role": role, "nom": nom})
     return jsonify({"message": "Compte créé.", "token": token,
                      "utilisateur": {"id": user_id, "role": role, "nom": nom, "identifiant": identifiant,
-                                      "telephone": telephone, "ville": data.get("ville"), "culture": data.get("culture")}}), 201
+                                      "telephone": telephone, "pays": data.get("pays"),
+                                      "ville": data.get("ville"), "culture": data.get("culture")}}), 201
 
 
 @app.post("/api/auth/login")
@@ -127,7 +138,8 @@ def login():
     token = make_token({"user_id": user["id"], "role": user["role"], "nom": user["nom"]})
     return jsonify({"token": token, "utilisateur": {
         "id": user["id"], "nom": user["nom"], "role": user["role"], "ville": user["ville"],
-        "identifiant": user["identifiant"], "telephone": user["telephone"], "culture": user["culture"]
+        "identifiant": user["identifiant"], "telephone": user["telephone"], "culture": user["culture"],
+        "pays": user.get("pays")
     }})
 
 
@@ -183,10 +195,14 @@ def creer_produit():
 def lister_produits():
     categorie = request.args.get("categorie", "").strip()
     ville = request.args.get("ville", "").strip()
+    recherche = request.args.get("q", "").strip()
 
     sql = """SELECT p.id, p.nom, p.prix, p.quantite, p.categorie, p.image1, p.image2,
                     u.nom AS producteur, u.id AS producteur_id, u.ville AS producteur_ville,
-                    COALESCE((SELECT ROUND(AVG(a.note)::numeric, 1) FROM avis a WHERE a.producteur_id = u.id), u.note::numeric) AS producteur_note
+                    u.pays AS producteur_pays,
+                    COALESCE((SELECT ROUND(AVG(a.note)::numeric, 1) FROM avis a WHERE a.producteur_id = u.id), u.note::numeric) AS producteur_note,
+                    COALESCE((SELECT pc.prix FROM prix_categories pc WHERE pc.categorie = p.categorie),
+                             (SELECT prix_deblocage FROM admin WHERE id = 1)) AS prix_deblocage_effectif
              FROM products p JOIN users u ON u.id = p.producteur_id
              WHERE u.statut = 'actif'"""
     params = []
@@ -194,8 +210,12 @@ def lister_produits():
         sql += " AND p.categorie = %s"
         params.append(categorie)
     if ville:
-        sql += " AND u.ville LIKE %s"
+        sql += " AND u.ville ILIKE %s"
         params.append(f"%{ville}%")
+    if recherche:
+        sql += " AND (p.nom ILIKE %s OR p.description ILIKE %s)"
+        params.append(f"%{recherche}%")
+        params.append(f"%{recherche}%")
     sql += " ORDER BY p.created_at DESC"
 
     conn = db.get_conn()
@@ -289,7 +309,7 @@ def debloquer_contact(produit_id):
         conn.close()
         return jsonify({"erreur": "Produit introuvable."}), 404
 
-    prix = get_prix_deblocage(conn)
+    prix = get_prix_pour_categorie(conn, produit["categorie"])
     reference = "AGL-" + uuid.uuid4().hex[:10].upper()
     conn.execute(
         """INSERT INTO contact_unlocks (acheteur_id, product_id, montant, methode, reference, statut)
@@ -306,6 +326,60 @@ def debloquer_contact(produit_id):
         "message": "Paiement initié. Confirmez sur votre téléphone pour débloquer le contact.",
         "reference": reference,
         "montant": prix,
+    }), 202
+
+
+@app.post("/api/produits/<int:produit_id>/debloquer-invite")
+def debloquer_contact_invite(produit_id):
+    """
+    Permet à quelqu'un venant directement d'un réseau social (Facebook, TikTok...)
+    de débloquer un contact sans créer de compte au préalable. Un compte
+    acheteur léger est créé automatiquement en coulisses avec son nom et son
+    téléphone, pour rester compatible avec le reste du système.
+    """
+    data = request.get_json(force=True) or {}
+    nom = (data.get("nom") or "").strip()
+    telephone = (data.get("telephone") or "").strip()
+    methode = data.get("methode")
+    numero_paiement = data.get("numero_paiement")
+
+    if not nom or not telephone:
+        return jsonify({"erreur": "Nom et téléphone requis."}), 400
+    if methode not in METHODES_VALIDES:
+        return jsonify({"erreur": "Moyen de paiement invalide (Wave, MTN Money, Orange Money, Moov Money)."}), 400
+    if not numero_paiement:
+        return jsonify({"erreur": "Numéro de paiement requis."}), 400
+
+    conn = db.get_conn()
+    produit = conn.execute("SELECT * FROM products WHERE id = %s", (produit_id,)).fetchone()
+    if not produit:
+        conn.close()
+        return jsonify({"erreur": "Produit introuvable."}), 404
+
+    identifiant_invite = "invite-" + uuid.uuid4().hex[:10]
+    cur = conn.execute(
+        """INSERT INTO users (role, nom, identifiant, telephone, password_hash)
+           VALUES ('acheteur', %s, %s, %s, %s) RETURNING id""",
+        (nom, identifiant_invite, telephone, generate_password_hash(uuid.uuid4().hex)),
+    )
+    user_id = cur.fetchone()["id"]
+
+    prix = get_prix_pour_categorie(conn, produit["categorie"])
+    reference = "AGL-" + uuid.uuid4().hex[:10].upper()
+    conn.execute(
+        """INSERT INTO contact_unlocks (acheteur_id, product_id, montant, methode, reference, statut)
+           VALUES (%s,%s,%s,%s,%s, 'en_attente')""",
+        (user_id, produit_id, prix, methode, reference),
+    )
+    conn.commit()
+    conn.close()
+
+    token = make_token({"user_id": user_id, "role": "acheteur", "nom": nom})
+    return jsonify({
+        "message": "Paiement initié. Confirmez sur votre téléphone pour débloquer le contact.",
+        "reference": reference,
+        "montant": prix,
+        "token": token,
     }), 202
 
 
@@ -538,6 +612,46 @@ def set_prix():
     return jsonify({"message": "Prix du déblocage mis à jour.", "prix_deblocage": int(prix)})
 
 
+@app.get("/api/admin/prix-categories")
+@require_role("admin")
+def get_prix_categories():
+    conn = db.get_conn()
+    rows = conn.execute("SELECT categorie, prix FROM prix_categories ORDER BY categorie").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.put("/api/admin/prix-categories")
+@require_role("admin")
+def set_prix_categorie():
+    data = request.get_json(force=True) or {}
+    categorie = (data.get("categorie") or "").strip()
+    prix = data.get("prix")
+    if not categorie:
+        return jsonify({"erreur": "Catégorie requise."}), 400
+    if not isinstance(prix, (int, float)) or prix <= 0:
+        return jsonify({"erreur": "Montant invalide."}), 400
+    conn = db.get_conn()
+    conn.execute(
+        """INSERT INTO prix_categories (categorie, prix) VALUES (%s, %s)
+           ON CONFLICT (categorie) DO UPDATE SET prix = excluded.prix""",
+        (categorie, int(prix)),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Prix personnalisé enregistré.", "categorie": categorie, "prix": int(prix)})
+
+
+@app.delete("/api/admin/prix-categories/<categorie>")
+@require_role("admin")
+def supprimer_prix_categorie(categorie):
+    conn = db.get_conn()
+    conn.execute("DELETE FROM prix_categories WHERE categorie = %s", (categorie,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Prix personnalisé supprimé, retour au prix standard."})
+
+
 @app.get("/api/admin/comptes")
 @require_role("admin")
 def liste_comptes():
@@ -546,7 +660,7 @@ def liste_comptes():
     # (le nom de connexion) est visible ici.
     conn = db.get_conn()
     rows = conn.execute(
-        "SELECT nom, role, identifiant, ville, statut FROM users ORDER BY role, nom"
+        "SELECT nom, role, identifiant, pays, ville, statut FROM users ORDER BY role, nom"
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
