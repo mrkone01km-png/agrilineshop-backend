@@ -97,11 +97,18 @@ def register():
         conn.close()
         return jsonify({"erreur": "Cet identifiant est déjà utilisé."}), 409
 
+    agent_id = None
+    code_agent = (data.get("code_agent") or "").strip()
+    if code_agent:
+        agent = conn.execute("SELECT id FROM agents WHERE code = %s", (code_agent,)).fetchone()
+        if agent:
+            agent_id = agent["id"]
+
     cur = conn.execute(
-        """INSERT INTO users (role, nom, identifiant, telephone, pays, ville, culture, password_hash)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        """INSERT INTO users (role, nom, identifiant, telephone, pays, ville, culture, password_hash, agent_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (role, nom, identifiant, telephone, data.get("pays"), data.get("ville"), data.get("culture"),
-         generate_password_hash(mot_de_passe)),
+         generate_password_hash(mot_de_passe), agent_id),
     )
     user_id = cur.fetchone()["id"]
     conn.commit()
@@ -650,6 +657,129 @@ def supprimer_prix_categorie(categorie):
     conn.commit()
     conn.close()
     return jsonify({"message": "Prix personnalisé supprimé, retour au prix standard."})
+
+
+# ---------------------------------------------------------------------------
+# Agents de terrain (recrutement de producteurs/acheteurs, commission 10%)
+# ---------------------------------------------------------------------------
+
+TAUX_COMMISSION_AGENT = 0.10
+
+
+@app.post("/api/admin/agents")
+@require_role("admin")
+def creer_agent():
+    data = request.get_json(force=True) or {}
+    nom = (data.get("nom") or "").strip()
+    telephone = (data.get("telephone") or "").strip()
+    if not nom:
+        return jsonify({"erreur": "Le nom de l'agent est requis."}), 400
+
+    code = "AGT-" + uuid.uuid4().hex[:6].upper()
+    conn = db.get_conn()
+    cur = conn.execute(
+        "INSERT INTO agents (nom, code, telephone) VALUES (%s,%s,%s) RETURNING id",
+        (nom, code, telephone),
+    )
+    agent_id = cur.fetchone()["id"]
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Agent créé.", "id": agent_id, "code": code}), 201
+
+
+@app.get("/api/admin/agents")
+@require_role("admin")
+def liste_agents():
+    conn = db.get_conn()
+    agents = conn.execute("SELECT id, nom, code, telephone, total_paye FROM agents ORDER BY nom").fetchall()
+
+    resultat = []
+    for a in agents:
+        # Revenu généré par les déblocages liés aux producteurs OU aux acheteurs que cet agent a recrutés.
+        row = conn.execute(
+            """SELECT COALESCE(SUM(cu.montant), 0) AS total
+               FROM contact_unlocks cu
+               JOIN products p ON p.id = cu.product_id
+               JOIN users prod ON prod.id = p.producteur_id
+               JOIN users ach ON ach.id = cu.acheteur_id
+               WHERE cu.statut = 'paye' AND (prod.agent_id = %s OR ach.agent_id = %s)""",
+            (a["id"], a["id"]),
+        ).fetchone()
+        revenu_genere = row["total"] or 0
+        nb_producteurs = conn.execute(
+            "SELECT COUNT(*) c FROM users WHERE agent_id = %s AND role = 'producteur'", (a["id"],)
+        ).fetchone()["c"]
+        nb_acheteurs = conn.execute(
+            "SELECT COUNT(*) c FROM users WHERE agent_id = %s AND role = 'acheteur'", (a["id"],)
+        ).fetchone()["c"]
+
+        commission_totale = round(revenu_genere * TAUX_COMMISSION_AGENT)
+        reste_a_payer = commission_totale - a["total_paye"]
+
+        resultat.append({
+            "id": a["id"], "nom": a["nom"], "code": a["code"], "telephone": a["telephone"],
+            "nb_producteurs": nb_producteurs, "nb_acheteurs": nb_acheteurs,
+            "revenu_genere": revenu_genere, "commission_totale": commission_totale,
+            "total_paye": a["total_paye"], "reste_a_payer": max(0, reste_a_payer),
+        })
+
+    conn.close()
+    return jsonify(resultat)
+
+
+@app.post("/api/admin/agents/<int:agent_id>/payer")
+@require_role("admin")
+def payer_agent(agent_id):
+    conn = db.get_conn()
+    agent = conn.execute("SELECT * FROM agents WHERE id = %s", (agent_id,)).fetchone()
+    if not agent:
+        conn.close()
+        return jsonify({"erreur": "Agent introuvable."}), 404
+
+    row = conn.execute(
+        """SELECT COALESCE(SUM(cu.montant), 0) AS total
+           FROM contact_unlocks cu
+           JOIN products p ON p.id = cu.product_id
+           JOIN users prod ON prod.id = p.producteur_id
+           JOIN users ach ON ach.id = cu.acheteur_id
+           WHERE cu.statut = 'paye' AND (prod.agent_id = %s OR ach.agent_id = %s)""",
+        (agent_id, agent_id),
+    ).fetchone()
+    revenu_genere = row["total"] or 0
+    commission_totale = round(revenu_genere * TAUX_COMMISSION_AGENT)
+    reste_a_payer = max(0, commission_totale - agent["total_paye"])
+
+    if reste_a_payer <= 0:
+        conn.close()
+        return jsonify({"erreur": "Rien à payer pour cet agent pour le moment."}), 400
+
+    nouveau_total_paye = agent["total_paye"] + reste_a_payer
+    conn.execute("UPDATE agents SET total_paye = %s WHERE id = %s", (nouveau_total_paye, agent_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Paiement enregistré.", "montant_paye": reste_a_payer, "total_paye": nouveau_total_paye})
+
+
+# ---------------------------------------------------------------------------
+# Statistiques de revenus par pays
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/revenus-par-pays")
+@require_role("admin")
+def revenus_par_pays():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT COALESCE(prod.pays, 'Non renseigné') AS pays, COALESCE(SUM(cu.montant), 0) AS revenu,
+                  COUNT(*) AS nb_deblocages
+           FROM contact_unlocks cu
+           JOIN products p ON p.id = cu.product_id
+           JOIN users prod ON prod.id = p.producteur_id
+           WHERE cu.statut = 'paye'
+           GROUP BY prod.pays
+           ORDER BY revenu DESC"""
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 @app.get("/api/admin/comptes")

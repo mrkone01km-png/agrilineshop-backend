@@ -86,6 +86,14 @@ SCHEMA_STATEMENTS = [
         categorie TEXT PRIMARY KEY,
         prix INTEGER NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS agents (
+        id SERIAL PRIMARY KEY,
+        nom TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        telephone TEXT,
+        total_paye INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )""",
 ]
 
 
@@ -161,6 +169,7 @@ def init_db(default_admin_hash):
     # Migration douce (ne supprime jamais de données) pour les bases déjà
     # créées avant l'ajout de la colonne "pays".
     conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS pays TEXT"])
+    conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id)"])
     row = conn.execute("SELECT id FROM admin WHERE id = 1").fetchone()
     if row is None:
         conn.execute(
