@@ -14,6 +14,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import os
 import datetime
+import time
+import requests
 
 import db
 from auth_utils import make_token, require_role
@@ -73,6 +75,30 @@ def get_prix_pour_categorie(conn, categorie):
     return get_prix_deblocage(conn)
 
 
+def geocoder_ville(ville, pays):
+    """
+    Convertit une ville + pays en coordonnées (latitude, longitude), via le
+    service gratuit OpenStreetMap Nominatim (aucune clé, aucun coût). En cas
+    d'échec (ville introuvable, service indisponible...), renvoie (None, None)
+    sans jamais bloquer l'inscription.
+    """
+    if not ville:
+        return None, None
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": f"{ville}, {pays or ''}", "format": "json", "limit": 1},
+            headers={"User-Agent": "AgriLineShop/1.0 (contact: agrilineshop@gmail.com)"},
+            timeout=5,
+        )
+        results = resp.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception:
+        pass
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 # Authentification producteur / acheteur (par identifiant, pas par téléphone)
 # ---------------------------------------------------------------------------
@@ -104,11 +130,12 @@ def register():
         if agent:
             agent_id = agent["id"]
 
+    lat, lon = geocoder_ville(data.get("ville"), data.get("pays"))
     cur = conn.execute(
-        """INSERT INTO users (role, nom, identifiant, telephone, pays, ville, culture, password_hash, agent_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        """INSERT INTO users (role, nom, identifiant, telephone, pays, ville, culture, password_hash, agent_id, latitude, longitude)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (role, nom, identifiant, telephone, data.get("pays"), data.get("ville"), data.get("culture"),
-         generate_password_hash(mot_de_passe), agent_id),
+         generate_password_hash(mot_de_passe), agent_id, lat, lon),
     )
     user_id = cur.fetchone()["id"]
     conn.commit()
@@ -780,6 +807,51 @@ def revenus_par_pays():
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ---------------------------------------------------------------------------
+# Cartographie des lieux d'enregistrement (producteurs et/ou acheteurs)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/carte-comptes")
+@require_role("admin")
+def carte_comptes():
+    role = request.args.get("role", "").strip()
+    sql = """SELECT nom, role, ville, pays, latitude, longitude
+             FROM users WHERE latitude IS NOT NULL AND longitude IS NOT NULL"""
+    params = []
+    if role in ("producteur", "acheteur"):
+        sql += " AND role = %s"
+        params.append(role)
+    conn = db.get_conn()
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post("/api/admin/geocoder-existants")
+@require_role("admin")
+def geocoder_existants():
+    """Géocode (gratuitement, via OpenStreetMap) les comptes déjà inscrits
+    avant l'ajout de la carte, qui n'ont donc pas encore de coordonnées.
+    Traite un petit lot à la fois pour respecter la limite du service gratuit."""
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT id, ville, pays FROM users
+           WHERE ville IS NOT NULL AND ville != '' AND latitude IS NULL
+           LIMIT 15"""
+    ).fetchall()
+
+    traites = 0
+    for r in rows:
+        lat, lon = geocoder_ville(r["ville"], r["pays"])
+        if lat is not None:
+            conn.execute("UPDATE users SET latitude = %s, longitude = %s WHERE id = %s", (lat, lon, r["id"]))
+            traites += 1
+        time.sleep(1)  # limite du service gratuit Nominatim : 1 requête par seconde maximum
+    conn.commit()
+    conn.close()
+    return jsonify({"message": f"{traites} compte(s) géocodé(s).", "traites": traites, "restants_a_verifier": len(rows) - traites})
 
 
 @app.get("/api/admin/comptes")

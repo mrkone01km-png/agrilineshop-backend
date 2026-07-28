@@ -170,6 +170,8 @@ def init_db(default_admin_hash):
     # créées avant l'ajout de la colonne "pays".
     conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS pays TEXT"])
     conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id)"])
+    conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS latitude REAL"])
+    conn.executescript(["ALTER TABLE users ADD COLUMN IF NOT EXISTS longitude REAL"])
     row = conn.execute("SELECT id FROM admin WHERE id = 1").fetchone()
     if row is None:
         conn.execute(
