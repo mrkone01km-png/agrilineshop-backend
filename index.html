@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgriLineShop</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#1E5A45">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{
+  --forest:#1E5A45;
+  --forest-dark:#123D2E;
+  --gold:#E4A73B;
+  --gold-dark:#B87F1E;
+  --soil:#332318;
+  --paper:#F3EEDD;
+  --paper-2:#EAE2C8;
+  --hibiscus:#B8382F;
+  --sky:#E4EFE6;
+  --white:#FFFCF6;
+  --line:rgba(51,35,24,0.16);
+  --radius:14px;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--soil);font-family:'IBM Plex Sans',Segoe UI,sans-serif;}
+h1,h2,h3,.display{font-family:'Fraunces',Georgia,serif;}
+.mono{font-family:'IBM Plex Mono',Consolas,monospace;}
+button{cursor:pointer;font-family:inherit;}
+input,select,textarea{font-family:inherit;}
+
+/* ---------- Shell ---------- */
+.shell{max-width:1100px;margin:0 auto;padding:0 20px 60px;}
+.topbar{background:var(--forest-dark);color:var(--white);}
+.topbar-in{max-width:1100px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.brand{display:flex;align-items:center;gap:10px;}
+.logo-mark{width:34px;height:34px;border-radius:9px;flex-shrink:0;display:block;}
+.brand-name{font-family:'Fraunces';font-weight:700;font-size:22px;letter-spacing:0.2px;}
+.brand-tag{font-size:12px;opacity:0.75;font-family:'IBM Plex Mono';letter-spacing:0.5px;}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap;}
+nav.tabs button{background:transparent;border:1px solid transparent;color:var(--white);opacity:0.8;padding:8px 14px;border-radius:999px;font-size:14px;font-weight:500;transition:.15s;}
+nav.tabs button:hover{opacity:1;background:rgba(255,255,255,0.08);}
+nav.tabs button.active{opacity:1;background:var(--gold);color:var(--forest-dark);font-weight:600;}
+.session-box{display:flex;align-items:center;gap:10px;font-size:12.5px;}
+.session-box button{background:transparent;border:1px solid rgba(255,255,255,0.45);color:var(--white);padding:6px 13px;border-radius:999px;font-size:12px;font-weight:600;}
+.session-box button:hover{background:rgba(255,255,255,0.12);}
+
+.view{display:none;animation:fade .25s ease;}
+.view.active{display:block;}
+@keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+/* ---------- Landing ---------- */
+.hero{padding:56px 0 30px;display:grid;grid-template-columns:1.2fr 1fr;gap:36px;align-items:center;}
+.hero h1{font-size:44px;line-height:1.08;margin:0 0 14px;color:var(--forest-dark);}
+.hero h1 em{color:var(--gold-dark);font-style:italic;}
+.hero p.lead{font-size:16.5px;line-height:1.6;max-width:46ch;margin:0 0 22px;opacity:0.85;}
+.cta-row{display:flex;gap:12px;flex-wrap:wrap;}
+.btn{border:none;border-radius:10px;padding:13px 20px;font-weight:600;font-size:14.5px;}
+.btn-primary{background:var(--forest);color:var(--white);}
+.btn-primary:hover{background:var(--forest-dark);}
+.btn-gold{background:var(--gold);color:var(--soil);}
+.btn-gold:hover{background:var(--gold-dark);color:var(--white);}
+.btn-ghost{background:transparent;border:1.5px solid var(--soil);color:var(--soil);}
+.btn-danger{background:var(--hibiscus);color:var(--white);}
+.btn-outline-danger{background:transparent;border:1.5px solid var(--hibiscus);color:var(--hibiscus);}
+.btn:disabled{opacity:0.45;cursor:not-allowed;}
+
+.ticket{background:var(--white);border-radius:10px;padding:22px;position:relative;box-shadow:0 18px 40px -18px rgba(51,35,24,0.35);}
+.ticket:before,.ticket:after{content:"";position:absolute;top:50%;width:22px;height:22px;background:var(--paper);border-radius:50%;transform:translateY(-50%);}
+.ticket:before{left:-11px;}
+.ticket:after{right:-11px;}
+.ticket .perf{border-top:2px dashed var(--line);margin:14px 0;}
+.ticket .label{font-family:'IBM Plex Mono';font-size:11px;letter-spacing:1px;text-transform:uppercase;opacity:0.55;}
+.ticket .amount{font-family:'Fraunces';font-size:30px;color:var(--forest-dark);}
+
+.stats-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0;}
+.stats-strip.cols-3{grid-template-columns:repeat(3,1fr);}
+.stats-strip.cols-5{grid-template-columns:repeat(5,1fr);}
+.stat-card{background:var(--white);border-radius:var(--radius);padding:16px 18px;border:1px solid var(--line);}
+.stat-card .n{font-family:'IBM Plex Mono';font-size:24px;font-weight:600;color:var(--forest-dark);}
+.stat-card .l{font-size:12.5px;opacity:0.7;}
+
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:20px 0 40px;}
+.step{background:var(--sky);border-radius:var(--radius);padding:20px;border:1px solid var(--line);}
+.step .num{font-family:'Fraunces';font-style:italic;font-size:26px;color:var(--gold-dark);}
+.step h3{margin:6px 0 6px;font-size:17px;}
+.step p{margin:0;font-size:13.5px;opacity:0.8;line-height:1.5;}
+
+.badges{display:flex;gap:10px;margin-top:26px;flex-wrap:wrap;}
+.badge{border:1.5px solid var(--soil);border-radius:10px;padding:9px 16px;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:8px;opacity:0.85;}
+
+/* ---------- Cards / forms ---------- */
+.panel{background:var(--white);border-radius:var(--radius);border:1px solid var(--line);padding:26px;margin-bottom:20px;}
+.panel h2{margin-top:0;font-size:21px;color:var(--forest-dark);}
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:12.5px;font-weight:600;margin-bottom:5px;opacity:0.8;}
+.field input,.field select,.field textarea{width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--paper);font-size:14px;}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--gold);border-color:transparent;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.role-toggle{display:flex;gap:10px;margin-bottom:20px;}
+.role-toggle button{flex:1;padding:12px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);font-weight:600;}
+.role-toggle button.active{background:var(--forest);color:var(--white);border-color:var(--forest);}
+
+.pwd-wrap{position:relative;}
+.pwd-wrap input{padding-right:44px;}
+.pwd-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;font-size:16px;padding:6px 9px;opacity:0.55;border-radius:6px;}
+.pwd-eye:hover{opacity:1;background:var(--paper-2);}
+.pwd-eye.static{position:static;transform:none;}
+
+.tel-wrap{display:flex;}
+.tel-prefix{background:var(--paper-2);border:1.5px solid var(--line);border-right:none;border-radius:8px 0 0 8px;padding:0 12px;font-size:14px;font-weight:700;color:var(--forest-dark);display:flex;align-items:center;white-space:nowrap;}
+.tel-wrap input{border-radius:0 8px 8px 0 !important;}
+
+.search-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.search-row input{flex:2;min-width:180px;}
+.search-row select{flex:1;min-width:140px;}
+.rate-stars{font-size:22px;letter-spacing:4px;margin-bottom:10px;cursor:pointer;color:var(--gold-dark);}
+.rate-stars span{cursor:pointer;}
+
+.img-drops{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px;}
+.img-drop{border:2px dashed var(--line);border-radius:10px;height:120px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:var(--sky);font-size:12.5px;text-align:center;color:var(--forest-dark);}
+.img-drop img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;}
+.img-drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;}
+.hint{font-size:12px;opacity:0.65;margin:6px 0 16px;}
+.hint.warn{color:var(--hibiscus);opacity:1;font-weight:600;}
+
+.locked-box{text-align:center;padding:36px 20px;}
+.locked-box p{max-width:44ch;margin:0 auto 18px;opacity:0.75;}
+
+.product-list{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.product-card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+.product-card .imgs{display:grid;grid-template-columns:1fr 1fr;height:110px;}
+.product-card .imgs div{background:var(--sky);display:flex;align-items:center;justify-content:center;font-size:22px;}
+.product-card .body{padding:14px;}
+.product-card h4{margin:0 0 4px;font-size:15.5px;}
+.product-card .price{font-family:'IBM Plex Mono';font-weight:600;color:var(--forest-dark);}
+.product-card .meta{font-size:12px;opacity:0.65;margin:6px 0 12px;}
+.product-card .contact-locked{font-size:12.5px;background:var(--paper-2);border-radius:8px;padding:8px 10px;margin-bottom:10px;filter:blur(0.3px);}
+.product-card .contact-unlocked{font-size:12.5px;background:var(--sky);border:1px solid var(--forest);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-weight:600;}
+
+/* ---------- Admin ---------- */
+.admin-login{max-width:380px;margin:60px auto;}
+.table-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);}
+th{font-family:'IBM Plex Mono';font-size:11.5px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.6;}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;}
+.pill.ok{background:var(--sky);color:var(--forest-dark);}
+.pill.susp{background:#f5dcd9;color:var(--hibiscus);}
+.note-stars{color:var(--gold-dark);font-family:'IBM Plex Mono';}
+
+.modal-bg{position:fixed;inset:0;background:rgba(19,25,20,0.55);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+.modal-bg.open{display:flex;}
+.modal{background:var(--white);border-radius:16px;padding:28px;max-width:380px;width:100%;}
+.modal h3{margin-top:0;}
+.pay-methods{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0;}
+.pay-methods button{padding:12px 8px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);font-weight:600;font-size:13px;}
+.pay-methods button.sel{border-color:var(--forest);background:var(--sky);}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--forest-dark);color:var(--white);padding:12px 20px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:90vw;text-align:center;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
+
+.section-title{font-size:12.5px;text-transform:uppercase;letter-spacing:1px;font-family:'IBM Plex Mono';opacity:0.55;margin:30px 0 12px;}
+.small-btn{padding:6px 12px;font-size:12.5px;border-radius:7px;}
+.admin-topbar{display:flex;justify-content:flex-end;margin-bottom:6px;}
+footer{text-align:center;padding:30px 0 10px;font-size:12px;opacity:0.55;}
+
+/* ---------- Assistant (chat) ---------- */
+.chat-fab{position:fixed;bottom:22px;right:22px;width:60px;height:60px;border-radius:50%;background:var(--gold);color:var(--forest-dark);border:none;font-size:26px;box-shadow:0 10px 24px -8px rgba(0,0,0,0.4);z-index:70;display:flex;align-items:center;justify-content:center;}
+.chat-fab:hover{background:var(--gold-dark);color:var(--white);}
+.chat-panel{position:fixed;bottom:92px;right:22px;width:340px;max-width:calc(100vw - 32px);height:460px;max-height:70vh;background:var(--white);border-radius:16px;box-shadow:0 20px 50px -14px rgba(0,0,0,0.45);display:none;flex-direction:column;overflow:hidden;z-index:70;border:1px solid var(--line);}
+.chat-panel.open{display:flex;}
+.chat-head{background:var(--forest-dark);color:var(--white);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.chat-head-title{font-family:'Fraunces';font-weight:700;font-size:15.5px;}
+.chat-head-sub{font-size:11px;opacity:0.7;font-family:'IBM Plex Mono';}
+.chat-close{background:transparent;border:none;color:var(--white);font-size:20px;opacity:0.8;padding:2px 6px;}
+.chat-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--paper);}
+.chat-msg{max-width:85%;padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;}
+.chat-msg.bot{background:var(--white);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:3px;}
+.chat-msg.user{background:var(--forest);color:var(--white);align-self:flex-end;border-bottom-right-radius:3px;}
+.chat-quick{display:flex;flex-direction:column;gap:7px;margin-top:2px;}
+.chat-quick button{background:var(--sky);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13px;text-align:left;color:var(--forest-dark);font-weight:500;}
+.chat-quick button:hover{background:var(--paper-2);}
+.chat-foot{border-top:1px solid var(--line);padding:10px;display:flex;gap:8px;flex-shrink:0;background:var(--white);}
+.chat-foot input{flex:1;border:1.5px solid var(--line);border-radius:20px;padding:9px 14px;font-size:13.5px;background:var(--paper);}
+.chat-foot button{background:var(--gold);border:none;border-radius:20px;padding:9px 16px;font-weight:700;color:var(--soil);font-size:13px;}
+@media(max-width:480px){
+  .chat-panel{right:14px;bottom:82px;}
+  .chat-fab{right:14px;bottom:14px;}
+}
+
+@media(max-width:760px){
+  .hero{grid-template-columns:1fr;}
+  .stats-strip, .stats-strip.cols-3, .stats-strip.cols-5{grid-template-columns:repeat(2,1fr);}
+  .steps{grid-template-columns:1fr;}
+  .grid2{grid-template-columns:1fr;}
+  .product-list{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <svg class="logo-mark" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="200" rx="44" fill="#E4A73B"/>
+        <path d="M56 128 L144 128 L133 174 Q100 182 67 174 Z" fill="#FFFCF6"/>
+        <path d="M67 128 L133 128 L125 156 Q100 162 75 156 Z" fill="#1E5A45"/>
+        <path d="M100 128 C100 96 78 82 58 72 C76 104 90 118 100 128 Z" fill="#1E5A45"/>
+        <path d="M100 128 C100 90 124 74 146 62 C124 96 110 114 100 128 Z" fill="#123D2E"/>
+        <line x1="100" y1="128" x2="100" y2="64" stroke="#FFFCF6" stroke-width="7" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <div class="brand-name">AgriLineShop</div>
+        <div class="brand-tag">CHAMP &middot; MARCHÉ &middot; CONTACT</div>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="accueil">Accueil</button>
+      <button class="tab-btn" data-view="compte">Mon compte</button>
+      <button class="tab-btn" data-view="producteur">Espace producteur</button>
+      <button class="tab-btn" data-view="acheteur">Espace acheteur</button>
+      <button class="tab-btn" data-view="admin">Admin</button>
+    </nav>
+    <div class="session-box" id="session-box"></div>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- ACCUEIL -->
+  <section class="view active" id="v-accueil">
+    <div class="hero">
+      <div>
+        <h1>Le champ rencontre <em>le marché.</em></h1>
+        <p class="lead">AgriLineShop met en relation directe les producteurs agricoles et les acheteurs. Un producteur publie, un acheteur trouve, et le contact se débloque en un paiement mobile — Wave, MTN Money, Orange Money ou Moov Money.</p>
+        <div class="cta-row">
+          <button class="btn btn-primary" onclick="showView('compte');preRole('producteur');setAuthMode('register')">Je suis producteur</button>
+          <button class="btn btn-gold" onclick="showView('compte');preRole('acheteur');setAuthMode('register')">Je suis acheteur</button>
+        </div>
+        <div class="badges">
+          <span class="badge">▶ Disponible sur Play Store*</span>
+          <span class="badge">▶ Disponible sur App Store*</span>
+        </div>
+        <div class="hint">*Liens de téléchargement à activer après publication sur les stores.</div>
+      </div>
+      <div class="ticket">
+        <div class="label">Reçu de déblocage</div>
+        <div class="amount" id="ticket-amount">300 FCFA</div>
+        <div class="perf"></div>
+        <div style="font-size:13px;line-height:1.7">
+          Producteur&nbsp;: <strong>Koffi A. — Tomates</strong><br>
+          Payé via&nbsp;: <strong id="ticket-method">Wave</strong><br>
+          Statut&nbsp;: <strong style="color:var(--forest-dark)">Contact débloqué ✓ (5 min)</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-strip cols-3">
+      <div class="stat-card"><div class="n" id="s-comptes-acheteurs">0</div><div class="l">Comptes acheteurs</div></div>
+      <div class="stat-card"><div class="n" id="s-comptes-producteurs">0</div><div class="l">Comptes producteurs</div></div>
+      <div class="stat-card"><div class="n" id="s-visites">0</div><div class="l">Visites sur le site</div></div>
+    </div>
+
+    <div class="section-title">Comment ça marche</div>
+    <div class="steps">
+      <div class="step"><div class="num">01</div><h3>Se connecter</h3><p>Producteur ou acheteur, chacun crée son compte avec un identifiant et un mot de passe, puis se connecte pour agir.</p></div>
+      <div class="step"><div class="num">02</div><h3>Publier ou chercher</h3><p>Le producteur publie un produit avec au moins 2 photos. L'acheteur parcourt les annonces disponibles.</p></div>
+      <div class="step"><div class="num">03</div><h3>Débloquer le contact</h3><p>L'acheteur paie via mobile money pour recevoir les coordonnées du producteur pendant 5 minutes.</p></div>
+    </div>
+  </section>
+
+  <!-- COMPTE : connexion + inscription -->
+  <section class="view" id="v-compte">
+    <div class="panel" style="max-width:520px;margin:20px auto;">
+      <div class="role-toggle">
+        <button id="mode-login" class="active" onclick="setAuthMode('login')">Se connecter</button>
+        <button id="mode-register" onclick="setAuthMode('register')">Créer un compte</button>
+      </div>
+      <div class="role-toggle">
+        <button id="role-prod" class="active" onclick="preRole('producteur')">Producteur</button>
+        <button id="role-ach" onclick="preRole('acheteur')">Acheteur</button>
+      </div>
+
+      <div id="login-block">
+        <h2>Se connecter</h2>
+        <div class="field"><label>Identifiant</label><input id="login-id" placeholder="Votre identifiant"></div>
+        <div class="field">
+          <label>Mot de passe</label>
+          <div class="pwd-wrap">
+            <input id="login-pwd" type="password" placeholder="••••••••">
+            <button type="button" class="pwd-eye" onclick="togglePwd('login-pwd', this)">👁</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="loginUser()">Se connecter</button>
+        <div id="login-msg" class="hint"></div>
+      </div>
+
+      <div id="register-block" style="display:none;">
+        <h2>Créer un compte</h2>
+        <div class="grid2">
+          <div class="field"><label>Nom complet</label><input id="sign-nom" placeholder="Ex : Awa Koné"></div>
+          <div class="field">
+            <label>Pays</label>
+            <select id="sign-pays" onchange="updateSignPrefix()">
+              <option data-p="225" selected>Côte d'Ivoire</option>
+              <option data-p="221">Sénégal</option>
+              <option data-p="223">Mali</option>
+              <option data-p="226">Burkina Faso</option>
+              <option data-p="227">Niger</option>
+              <option data-p="228">Togo</option>
+              <option data-p="229">Bénin</option>
+              <option data-p="224">Guinée</option>
+              <option data-p="245">Guinée-Bissau</option>
+              <option data-p="233">Ghana</option>
+              <option data-p="234">Nigeria</option>
+              <option data-p="231">Liberia</option>
+              <option data-p="232">Sierra Leone</option>
+              <option data-p="220">Gambie</option>
+              <option data-p="238">Cap-Vert</option>
+              <option data-p="222">Mauritanie</option>
+              <option data-p="237">Cameroun</option>
+              <option data-p="241">Gabon</option>
+              <option data-p="242">Congo</option>
+              <option data-p="235">Tchad</option>
+              <option data-p="236">République Centrafricaine</option>
+              <option data-p="240">Guinée Équatoriale</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Téléphone</label>
+          <div class="tel-wrap">
+            <span class="tel-prefix" id="sign-tel-prefix">+225</span>
+            <input id="sign-tel" placeholder="07 00 00 00 00">
+          </div>
+        </div>
+        <div class="field"><label>Ville / localité</label><input id="sign-ville" placeholder="Ex : Bouaké"></div>
+        <div class="field" id="field-culture"><label>Type de production</label><input id="sign-culture" placeholder="Ex : Tomates, maïs, cacao..."></div>
+        <div class="grid2">
+          <div class="field"><label>Identifiant</label><input id="sign-id" placeholder="Ex : awa_kone"></div>
+          <div class="field">
+            <label>Mot de passe</label>
+            <div class="pwd-wrap">
+              <input id="sign-pwd" type="password" placeholder="6 caractères minimum">
+              <button type="button" class="pwd-eye" onclick="togglePwd('sign-pwd', this)">👁</button>
+            </div>
+          </div>
+        </div>
+        <div class="field"><label>Code agent (facultatif — si un agent de terrain vous inscrit)</label><input id="sign-agent-code" placeholder="Ex : AGT-1A2B3C"></div>
+        <button class="btn btn-primary" style="width:100%" onclick="createAccount()">Créer mon compte</button>
+        <div id="sign-msg" class="hint"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCTEUR -->
+  <section class="view" id="v-producteur">
+    <div id="prod-locked" class="panel locked-box" style="display:none;">
+      <h2>Espace producteur</h2>
+      <p>Connectez-vous avec votre compte producteur pour publier un produit et gérer vos annonces.</p>
+      <button class="btn btn-primary" onclick="showView('compte');preRole('producteur');setAuthMode('login')">Se connecter en tant que producteur</button>
+    </div>
+
+    <div id="prod-content" style="display:none;">
+      <div class="panel">
+        <h2 id="prod-form-title">Publier un produit</h2>
+        <div class="grid2">
+          <div class="field"><label>Nom du produit</label><input id="p-nom" placeholder="Ex : Tomates fraîches"></div>
+          <div class="field"><label>Prix pour une unité (FCFA)</label><input id="p-prix" type="number" placeholder="Ex : 500"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Quantité disponible (précise l'unité : kg, sac, tas...)</label><input id="p-qte" placeholder="Ex : 200 kg"></div>
+          <div class="field"><label>Catégorie</label>
+            <input id="p-cat" list="cat-suggestions" placeholder="Ex : Igname, Tomates, Cacao...">
+            <datalist id="cat-suggestions">
+              <option>Légumes</option><option>Fruits</option><option>Céréales</option><option>Tubercules</option><option>Igname</option><option>Patate douce</option><option>Manioc</option><option>Élevage</option><option>Cacao</option><option>Café</option><option>Coton</option><option>Anacarde</option><option>Hévéa</option>
+            </datalist>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:-8px;">💡 Le prix correspond à <strong>une seule unité</strong> (le kg, le sac, le tas...) — précise laquelle dans "Quantité disponible". Exemple : Prix = 500, Quantité = "200 kg" → 500 FCFA le kilo, 200 kg en stock.</p>
+        <div class="field"><label>Description</label><textarea id="p-desc" rows="3" placeholder="Décrivez votre produit..."></textarea></div>
+        <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:5px;opacity:0.8;">Photos du produit (2 minimum)</label>
+        <div class="img-drops">
+          <div class="img-drop" id="drop1"><span>+ Photo 1</span><input type="file" accept="image/*" onchange="handleImg(this,1)"></div>
+          <div class="img-drop" id="drop2"><span>+ Photo 2</span><input type="file" accept="image/*" onchange="handleImg(this,2)"></div>
+        </div>
+        <div class="hint warn" id="img-warn">Ajoutez au moins 2 photos pour pouvoir publier.</div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-primary" id="btn-publish" disabled onclick="publishProduct()">Publier le produit</button>
+          <button class="btn btn-ghost" id="btn-cancel-edit" style="display:none;" onclick="cancelEdit()">Annuler la modification</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Mes produits publiés</h2>
+        <div class="product-list" id="my-products"><p class="hint">Aucun produit publié pour l'instant.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ACHETEUR -->
+  <section class="view" id="v-acheteur">
+    <div id="ach-locked" class="panel locked-box" style="display:none;">
+      <h2>Espace acheteur</h2>
+      <p>Connectez-vous avec votre compte acheteur pour parcourir le marché et débloquer des contacts.</p>
+      <button class="btn btn-gold" onclick="showView('compte');preRole('acheteur');setAuthMode('login')">Se connecter en tant qu'acheteur</button>
+    </div>
+
+    <div id="ach-content" style="display:none;">
+      <div class="panel">
+        <h2>Produits disponibles</h2>
+        <div class="search-row">
+          <input id="search-q" placeholder="🔍 Rechercher un produit (ex : tomates, manioc...)" oninput="debouncedLoadMarket()">
+          <select id="search-cat" onchange="loadMarket()">
+            <option value="">Toutes catégories</option>
+            <option>Légumes</option><option>Fruits</option><option>Céréales</option><option>Tubercules</option><option>Élevage</option><option>Cacao</option><option>Café</option><option>Coton</option><option>Anacarde</option><option>Hévéa</option>
+          </select>
+          <input id="search-ville" placeholder="Ville du producteur" oninput="debouncedLoadMarket()">
+        </div>
+        <div class="product-list" id="market-products"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADMIN -->
+  <section class="view" id="v-admin">
+    <div id="admin-login-box" class="admin-login panel">
+      <h2>Connexion administrateur</h2>
+      <div class="field"><label>Identifiant</label><input id="ad-id" placeholder="Identifiant"></div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <div class="pwd-wrap">
+          <input id="ad-pwd" type="password" placeholder="••••••••">
+          <button type="button" class="pwd-eye" onclick="togglePwd('ad-pwd', this)">👁</button>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="adminLogin()">Se connecter</button>
+      <div id="ad-msg" class="hint warn" style="display:none;">Identifiant ou mot de passe incorrect.</div>
+    </div>
+
+    <div id="admin-dash" style="display:none;">
+      <div class="admin-topbar">
+        <button class="btn btn-ghost small-btn" onclick="adminLogout()">Déconnexion</button>
+      </div>
+      <div class="stats-strip cols-5">
+        <div class="stat-card"><div class="n" id="ad-s-acheteurs">0</div><div class="l">Comptes acheteurs</div></div>
+        <div class="stat-card"><div class="n" id="ad-s-producteurs">0</div><div class="l">Comptes producteurs</div></div>
+        <div class="stat-card"><div class="n" id="ad-s-visites">0</div><div class="l">Visites</div></div>
+        <div class="stat-card"><div class="n" id="ad-s-deblocages">0</div><div class="l">Déblocages</div></div>
+        <div class="stat-card"><div class="n" id="ad-s-revenus">0 F</div><div class="l">Revenus totaux</div></div>
+      </div>
+
+      <div class="section-title">Carte des lieux d'enregistrement</div>
+      <div class="panel">
+        <p class="hint" style="margin-top:-6px;">Visible uniquement ici, sur ta page admin.</p>
+        <div class="role-toggle" style="max-width:420px;">
+          <button class="map-filter-btn active" data-role="" onclick="setMapFilter('')">Tous</button>
+          <button class="map-filter-btn" data-role="producteur" onclick="setMapFilter('producteur')">Producteurs</button>
+          <button class="map-filter-btn" data-role="acheteur" onclick="setMapFilter('acheteur')">Acheteurs</button>
+        </div>
+        <div id="admin-map" style="height:380px;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin:12px 0;"></div>
+        <button class="btn btn-ghost small-btn" id="btn-geocoder" onclick="geocoderExistants()">Localiser les comptes déjà inscrits (sans coordonnées)</button>
+        <span id="geocoder-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+      </div>
+
+      <div class="section-title">Revenus par pays</div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pays</th><th>Déblocages</th><th>Revenu</th></tr></thead>
+            <tbody id="admin-revenus-pays"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title">Prix du déblocage de contact</div>
+      <div class="panel">
+        <div class="grid2">
+          <div class="field"><label>Montant standard (FCFA)</label><input id="admin-price" type="number" placeholder="300"></div>
+        </div>
+        <button class="btn btn-gold" onclick="savePrice()">Enregistrer le nouveau prix</button>
+        <span id="price-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+      </div>
+
+      <div class="section-title">Prix spécifiques par culture de rente</div>
+      <div class="panel">
+        <p class="hint" style="margin-top:-6px;">Ajoute n'importe quelle culture (igname, un produit signalé comme culture de rente, etc.), coche celles concernées, indique un prix et clique "Appliquer". Décoche pour revenir au prix standard, ou retire complètement une culture de la liste avec le ×.</p>
+        <div class="grid2" style="margin-bottom:12px;">
+          <div class="field"><label>Ajouter une culture à la liste</label><input id="new-cat-name" placeholder="Ex : Igname"></div>
+          <div class="field" style="display:flex;align-items:flex-end;"><button class="btn btn-ghost" style="width:100%" onclick="addCatOption()">+ Ajouter à la liste</button></div>
+        </div>
+        <div id="cat-price-checks" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;"></div>
+        <div class="grid2">
+          <div class="field"><label>Prix à appliquer aux cultures cochées (FCFA)</label><input id="cat-price-value" type="number" placeholder="Ex : 2000"></div>
+        </div>
+        <button class="btn btn-gold" onclick="applyCatPrices()">Appliquer</button>
+        <span id="cat-price-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>Culture</th><th>Prix spécifique actuel</th></tr></thead>
+            <tbody id="admin-cat-prices"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title">Agents de terrain (commission 10%)</div>
+      <div class="panel">
+        <p class="hint" style="margin-top:-6px;">Crée un agent, donne-lui le code généré. Chaque producteur ou acheteur qu'il inscrit avec ce code (champ "Code agent" à l'inscription) est rattaché à lui — il touche 10% des revenus générés par ces comptes.</p>
+        <div class="grid2">
+          <div class="field"><label>Nom de l'agent</label><input id="new-agent-nom" placeholder="Ex : Ibrahim Coulibaly"></div>
+          <div class="field"><label>Téléphone (facultatif)</label><input id="new-agent-tel" placeholder="07 00 00 00 00"></div>
+        </div>
+        <button class="btn btn-gold" onclick="createAgent()">Créer cet agent</button>
+        <span id="agent-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>Agent</th><th>Code</th><th>Comptes</th><th>Revenu généré</th><th>Commission (10%)</th><th>Déjà payé</th><th>Reste à payer</th><th></th></tr></thead>
+            <tbody id="admin-agents"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title">Comptes créés</div>
+      <div class="panel">
+        <input id="admin-search-comptes" placeholder="🔍 Rechercher un compte (nom, identifiant, ville...)" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--paper);font-size:14px;margin-bottom:12px;" oninput="renderComptesTable()">
+        <p class="hint" style="margin-top:-6px;">Les mots de passe sont chiffrés et protégés — même l'administrateur ne peut pas les consulter en clair, c'est une bonne pratique de sécurité.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nom</th><th>Rôle</th><th>Identifiant</th><th>Ville</th><th>Statut</th></tr></thead>
+            <tbody id="admin-comptes"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title">Producteurs inscrits</div>
+      <div class="panel">
+        <input id="admin-search-producteurs" placeholder="🔍 Rechercher un producteur (nom, ville...)" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--paper);font-size:14px;margin-bottom:12px;" oninput="renderProducteursTable()">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nom</th><th>Localité</th><th>Note</th><th>Statut</th><th></th></tr></thead>
+            <tbody id="admin-producers"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title">Numéros de paiement (réception des commissions)</div>
+      <div class="panel">
+        <div class="grid2">
+          <div class="field"><label>Wave</label><input id="pay-wave" placeholder="07 00 00 00 00"></div>
+          <div class="field"><label>MTN Money</label><input id="pay-mtn" placeholder="05 00 00 00 00"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Orange Money</label><input id="pay-orange" placeholder="07 00 00 00 00"></div>
+          <div class="field"><label>Moov Money</label><input id="pay-moov" placeholder="01 00 00 00 00"></div>
+        </div>
+        <button class="btn btn-gold" onclick="savePay()">Enregistrer les numéros</button>
+        <span id="pay-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+      </div>
+
+      <div class="section-title">Sécurité — modifier mes identifiants</div>
+      <div class="panel">
+        <div class="grid2">
+          <div class="field"><label>Nouvel identifiant</label><input id="new-id" placeholder="Nouvel identifiant"></div>
+          <div class="field">
+            <label>Nouveau mot de passe</label>
+            <div class="pwd-wrap">
+              <input id="new-pwd" type="password" placeholder="••••••••">
+              <button type="button" class="pwd-eye" onclick="togglePwd('new-pwd', this)">👁</button>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="updateCreds()">Mettre à jour</button>
+        <span id="cred-msg" class="hint" style="display:inline-block;margin-left:10px;"></span>
+      </div>
+    </div>
+  </section>
+
+  <footer>AgriLineShop — mise en relation producteurs agricoles et acheteurs.</footer>
+</div>
+
+<div class="modal-bg" id="pay-modal">
+  <div class="modal">
+    <h3>Débloquer le contact</h3>
+    <p style="font-size:13.5px;opacity:0.8;margin-top:-8px;">Montant à payer : <strong class="mono" id="modal-amount">300 FCFA</strong><br>Le contact reste visible <strong>5 minutes</strong>, puis se reverrouille.</p>
+    <div id="modal-guest-fields" style="display:none;">
+      <div class="field"><label>Votre nom</label><input id="guest-nom" placeholder="Ex : Jean Kouassi"></div>
+    </div>
+    <div class="pay-methods">
+      <button data-m="Wave" onclick="selMethod(this)">Wave</button>
+      <button data-m="MTN Money" onclick="selMethod(this)">MTN Money</button>
+      <button data-m="Orange Money" onclick="selMethod(this)">Orange Money</button>
+      <button data-m="Moov Money" onclick="selMethod(this)">Moov Money</button>
+    </div>
+    <div class="field"><label>Numéro de paiement</label><input id="pay-num" placeholder="07 00 00 00 00"></div>
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" style="flex:1" onclick="confirmPay()">Payer</button>
+    </div>
+  </div>
+</div>
+
+<button class="chat-fab" onclick="toggleChat()" aria-label="Assistant AgriLineShop">💬</button>
+
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-head">
+    <div>
+      <div class="chat-head-title">Assistant AgriLineShop</div>
+      <div class="chat-head-sub">Réponses automatiques · pas un vrai conseiller</div>
+    </div>
+    <button class="chat-close" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-body" id="chat-body"></div>
+  <div class="chat-foot">
+    <input id="chat-input" placeholder="Écris ta question..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+    <button onclick="sendChatMessage()">Envoyer</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE = "https://agrilineshop-backend.onrender.com";
+
+let session = { role: null, account: null, token: null };
+let adminToken = null;
+let currentSignRole = 'producteur';
+let chosenMethod = null;
+let payTargetId = null;
+let marketProducts = [];
+let unlocks = {}; // { [produitId]: { contact, telephone, expiry } }
+let prixActuel = 300;
+
+/* Restaure la session depuis le navigateur si elle existe déjà */
+try {
+  const savedToken = localStorage.getItem('agl_token');
+  const savedRole = localStorage.getItem('agl_role');
+  const savedAccount = localStorage.getItem('agl_account');
+  if (savedToken && savedRole && savedAccount) {
+    session = { role: savedRole, account: JSON.parse(savedAccount), token: savedToken };
+  }
+  const savedAdmin = localStorage.getItem('agl_admin_token');
+  if (savedAdmin) adminToken = savedAdmin;
+} catch (e) { /* stockage indisponible, on continue sans session persistée */ }
+
+async function apiFetch(path, { method = 'GET', body = null, token = null } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  let res;
+  try {
+    res = await fetch(API_BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  } catch (e) {
+    throw new Error("Impossible de contacter le serveur. S'il n'a pas été utilisé depuis un moment, il peut mettre 30 à 50 secondes à redémarrer — réessaie dans un instant.");
+  }
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* réponse vide */ }
+  if (!res.ok) throw new Error(data.erreur || "Une erreur est survenue.");
+  return data;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function togglePwd(id, btn) {
+  const input = document.getElementById(id);
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = '🙈'; }
+  else { input.type = 'password'; btn.textContent = '👁'; }
+}
+
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('v-' + id).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === id));
+  if (id === 'accueil') refreshPublicStats();
+  if (id === 'acheteur') renderAcheteurSpace();
+  if (id === 'producteur') renderProducteurSpace();
+  if (id === 'admin' && adminToken) renderAdmin();
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+
+function preRole(role) {
+  currentSignRole = role;
+  document.getElementById('role-prod').classList.toggle('active', role === 'producteur');
+  document.getElementById('role-ach').classList.toggle('active', role === 'acheteur');
+  document.getElementById('field-culture').style.display = role === 'producteur' ? 'block' : 'none';
+}
+preRole('producteur');
+
+function updateSignPrefix() {
+  const sel = document.getElementById('sign-pays');
+  const prefix = sel.options[sel.selectedIndex].dataset.p;
+  document.getElementById('sign-tel-prefix').textContent = '+' + prefix;
+}
+updateSignPrefix();
+
+function setAuthMode(mode) {
+  document.getElementById('mode-login').classList.toggle('active', mode === 'login');
+  document.getElementById('mode-register').classList.toggle('active', mode === 'register');
+  document.getElementById('login-block').style.display = mode === 'login' ? 'block' : 'none';
+  document.getElementById('register-block').style.display = mode === 'register' ? 'block' : 'none';
+}
+setAuthMode('login');
+
+/* --- Session : connexion / déconnexion acheteur & producteur --- */
+function renderSessionBox() {
+  const box = document.getElementById('session-box');
+  if (session.role) {
+    const roleLabel = session.role === 'producteur' ? 'Producteur' : 'Acheteur';
+    box.innerHTML = 'Connecté : <strong>' + session.account.nom + '</strong> (' + roleLabel + ') '
+      + '<button onclick="logoutUser()">Déconnexion</button>';
+  } else {
+    box.innerHTML = '<button onclick="showView(\'compte\')">Se connecter</button>';
+  }
+}
+renderSessionBox();
+
+function saveSession() {
+  try {
+    localStorage.setItem('agl_token', session.token);
+    localStorage.setItem('agl_role', session.role);
+    localStorage.setItem('agl_account', JSON.stringify(session.account));
+  } catch (e) { /* stockage indisponible */ }
+}
+function clearSession() {
+  session = { role: null, account: null, token: null };
+  try {
+    localStorage.removeItem('agl_token');
+    localStorage.removeItem('agl_role');
+    localStorage.removeItem('agl_account');
+  } catch (e) { /* stockage indisponible */ }
+}
+
+async function loginUser() {
+  const identifiant = document.getElementById('login-id').value.trim();
+  const mot_de_passe = document.getElementById('login-pwd').value;
+  const msg = document.getElementById('login-msg');
+  msg.textContent = "Connexion en cours...";
+  try {
+    const data = await apiFetch('/api/auth/login', { method: 'POST', body: { identifiant, mot_de_passe, role: currentSignRole } });
+    session = { role: currentSignRole, account: data.utilisateur, token: data.token };
+    saveSession();
+    renderSessionBox();
+    msg.textContent = '';
+    document.getElementById('login-id').value = ''; document.getElementById('login-pwd').value = '';
+    toast("Bienvenue, " + data.utilisateur.nom + " !");
+    showView(currentSignRole === 'producteur' ? 'producteur' : 'acheteur');
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+function logoutUser() {
+  clearSession();
+  renderSessionBox();
+  toast("Vous êtes déconnecté(e).");
+  showView('accueil');
+}
+
+async function createAccount() {
+  const nom = document.getElementById('sign-nom').value.trim();
+  const pays = document.getElementById('sign-pays').value;
+  const prefix = document.getElementById('sign-tel-prefix').textContent;
+  const telLocal = document.getElementById('sign-tel').value.trim();
+  const tel = telLocal ? (prefix + ' ' + telLocal) : '';
+  const ville = document.getElementById('sign-ville').value.trim();
+  const culture = document.getElementById('sign-culture').value.trim();
+  const identifiant = document.getElementById('sign-id').value.trim();
+  const mot_de_passe = document.getElementById('sign-pwd').value;
+  const code_agent = document.getElementById('sign-agent-code').value.trim();
+  const msg = document.getElementById('sign-msg');
+
+  if (!nom || !identifiant || !mot_de_passe) {
+    msg.textContent = "Merci de renseigner au moins le nom, l'identifiant et le mot de passe.";
+    return;
+  }
+  if (mot_de_passe.length < 6) {
+    msg.textContent = "Le mot de passe doit contenir au moins 6 caractères.";
+    return;
+  }
+
+  msg.textContent = "Création du compte en cours...";
+  try {
+    const data = await apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: { role: currentSignRole, nom, telephone: tel, pays, ville, culture, identifiant, mot_de_passe, code_agent }
+    });
+    session = { role: currentSignRole, account: data.utilisateur, token: data.token };
+    saveSession();
+    renderSessionBox();
+    toast("Compte créé — vous êtes connecté(e) !");
+    ['sign-nom', 'sign-tel', 'sign-ville', 'sign-culture', 'sign-id', 'sign-pwd'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    msg.textContent = '';
+    showView(currentSignRole === 'producteur' ? 'producteur' : 'acheteur');
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+/* --- Statistiques publiques (page d'accueil) --- */
+async function refreshPublicStats() {
+  try {
+    const data = await apiFetch('/api/stats-publiques');
+    document.getElementById('s-comptes-acheteurs').textContent = data.comptes_acheteurs;
+    document.getElementById('s-comptes-producteurs').textContent = data.comptes_producteurs;
+    document.getElementById('s-visites').textContent = data.visites;
+    prixActuel = data.prix_deblocage;
+    updatePriceDisplays();
+  } catch (e) { /* silencieux sur la page d'accueil */ }
+}
+function updatePriceDisplays() {
+  document.getElementById('ticket-amount').textContent = prixActuel.toLocaleString('fr-FR') + " FCFA";
+  document.getElementById('modal-amount').textContent = prixActuel.toLocaleString('fr-FR') + " FCFA";
+}
+refreshPublicStats();
+
+/* --- Producteur : images + publication (protégé par connexion) --- */
+let images = { 1: null, 2: null };
+
+function renderProducteurSpace() {
+  const locked = session.role !== 'producteur';
+  document.getElementById('prod-locked').style.display = locked ? 'block' : 'none';
+  document.getElementById('prod-content').style.display = locked ? 'none' : 'block';
+  if (!locked) loadMyProducts();
+}
+
+function handleImg(input, slot) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    images[slot] = e.target.result;
+    const drop = document.getElementById('drop' + slot);
+    drop.innerHTML = '<img src="' + e.target.result + '">';
+    drop.appendChild(input);
+    checkImgs();
+  };
+  reader.readAsDataURL(file);
+}
+function checkImgs() {
+  const ok = images[1] && images[2];
+  document.getElementById('btn-publish').disabled = !ok;
+  document.getElementById('img-warn').style.display = ok ? 'none' : 'block';
+}
+
+let editingProductId = null;
+let myProductsCache = [];
+
+async function publishProduct() {
+  const nom = document.getElementById('p-nom').value.trim() || "Produit sans nom";
+  const prix = Number(document.getElementById('p-prix').value) || 0;
+  const cat = document.getElementById('p-cat').value;
+  const qte = document.getElementById('p-qte').value;
+  const description = document.getElementById('p-desc').value;
+
+  try {
+    if (editingProductId) {
+      const body = { nom, prix, categorie: cat, quantite: qte, description };
+      if (images[1]) body.image1 = images[1];
+      if (images[2]) body.image2 = images[2];
+      await apiFetch('/api/produits/' + editingProductId, { method: 'PUT', token: session.token, body });
+      toast("Produit mis à jour.");
+    } else {
+      if (!images[1] || !images[2]) { toast("Ajoutez 2 photos avant de publier."); return; }
+      await apiFetch('/api/produits', {
+        method: 'POST', token: session.token,
+        body: { nom, prix, categorie: cat, quantite: qte, description, image1: images[1], image2: images[2] }
+      });
+      toast("Produit publié avec ses 2 photos.");
+    }
+    resetProductForm();
+    loadMyProducts();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function resetProductForm() {
+  images = { 1: null, 2: null };
+  editingProductId = null;
+  document.getElementById('drop1').innerHTML = '<span>+ Photo 1</span><input type="file" accept="image/*" onchange="handleImg(this,1)">';
+  document.getElementById('drop2').innerHTML = '<span>+ Photo 2</span><input type="file" accept="image/*" onchange="handleImg(this,2)">';
+  document.getElementById('btn-publish').disabled = true;
+  document.getElementById('img-warn').style.display = 'block';
+  ['p-nom', 'p-prix', 'p-qte', 'p-desc'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('prod-form-title').textContent = 'Publier un produit';
+  document.getElementById('btn-publish').textContent = 'Publier le produit';
+  document.getElementById('btn-cancel-edit').style.display = 'none';
+}
+function cancelEdit() { resetProductForm(); }
+
+function editProduct(id) {
+  const p = myProductsCache.find(x => x.id === id);
+  if (!p) return;
+  editingProductId = id;
+  document.getElementById('p-nom').value = p.nom;
+  document.getElementById('p-prix').value = p.prix;
+  document.getElementById('p-qte').value = p.quantite || '';
+  document.getElementById('p-cat').value = p.categorie || 'Légumes';
+  document.getElementById('p-desc').value = p.description || '';
+  document.getElementById('drop1').innerHTML = '<img src="' + p.image1 + '">';
+  document.getElementById('drop2').innerHTML = '<img src="' + p.image2 + '">';
+  document.getElementById('btn-publish').disabled = false;
+  document.getElementById('img-warn').style.display = 'none';
+  document.getElementById('prod-form-title').textContent = 'Modifier ce produit';
+  document.getElementById('btn-publish').textContent = 'Enregistrer les modifications';
+  document.getElementById('btn-cancel-edit').style.display = 'inline-block';
+  document.getElementById('prod-content').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadMyProducts() {
+  const box = document.getElementById('my-products');
+  try {
+    const produits = await apiFetch('/api/produits/mes', { token: session.token });
+    myProductsCache = produits;
+    if (!produits.length) { box.innerHTML = '<p class="hint">Aucun produit publié pour l\'instant.</p>'; return; }
+    box.innerHTML = produits.map(p => `
+      <div class="product-card">
+        <div class="imgs"><div><img src="${p.image1}" style="width:100%;height:100%;object-fit:cover"></div><div><img src="${p.image2}" style="width:100%;height:100%;object-fit:cover"></div></div>
+        <div class="body">
+          <h4>${p.nom}</h4>
+          <div class="price">${Number(p.prix).toLocaleString('fr-FR')} FCFA</div>
+          <div class="meta">${p.categorie || ''}</div>
+          <div class="field" style="margin:10px 0 8px;">
+            <label>Stock disponible</label>
+            <input id="stock-${p.id}" value="${p.quantite || ''}" placeholder="Ex : 200 kg">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-ghost small-btn" style="flex:1" onclick="updateStock(${p.id})">Mettre à jour le stock</button>
+            <button class="btn btn-ghost small-btn" onclick="editProduct(${p.id})">Modifier</button>
+            <button class="btn btn-outline-danger small-btn" onclick="deleteProduct(${p.id})">Supprimer</button>
+          </div>
+          <button class="btn btn-gold small-btn" style="width:100%;margin-top:8px;" onclick="copyShareLink(${p.id}, '${p.nom.replace(/'/g, "\\'")}')">📤 Copier le lien à partager (Facebook / TikTok)</button>
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    box.innerHTML = '<p class="hint warn">' + e.message + '</p>';
+  }
+}
+
+function copyShareLink(id, nom) {
+  const lien = window.location.origin + window.location.pathname + '?produit=' + id;
+  const texte = `${nom} disponible maintenant sur AgriLineShop 🌾\nDécouvrez et débloquez le contact du vendeur ici :\n${lien}`;
+  navigator.clipboard.writeText(texte).then(() => {
+    toast("Texte + lien copiés — colle-les sur Facebook ou TikTok !");
+  }).catch(() => {
+    toast("Impossible de copier automatiquement, voici le lien : " + lien);
+  });
+}
+
+async function updateStock(id) {
+  const quantite = document.getElementById('stock-' + id).value.trim();
+  try {
+    await apiFetch('/api/produits/' + id, { method: 'PUT', token: session.token, body: { quantite } });
+    toast("Stock mis à jour.");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function deleteProduct(id) {
+  if (!confirm("Supprimer définitivement ce produit ?")) return;
+  try {
+    await apiFetch('/api/produits/' + id, { method: 'DELETE', token: session.token });
+    toast("Produit supprimé.");
+    if (editingProductId === id) resetProductForm();
+    loadMyProducts();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+/* --- Acheteur : marché + déblocage (protégé par connexion) --- */
+let guestMode = false;
+
+function renderAcheteurSpace() {
+  const locked = session.role !== 'acheteur' && !guestMode;
+  document.getElementById('ach-locked').style.display = locked ? 'block' : 'none';
+  document.getElementById('ach-content').style.display = locked ? 'none' : 'block';
+  if (!locked) loadMarket();
+}
+
+async function loadMarket() {
+  const box = document.getElementById('market-products');
+  box.innerHTML = '<p class="hint">Chargement du marché...</p>';
+  try {
+    const q = document.getElementById('search-q').value.trim();
+    const cat = document.getElementById('search-cat').value;
+    const ville = document.getElementById('search-ville').value.trim();
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (cat) params.set('categorie', cat);
+    if (ville) params.set('ville', ville);
+    const qs = params.toString() ? '?' + params.toString() : '';
+    marketProducts = await apiFetch('/api/produits' + qs);
+    drawMarket();
+  } catch (e) {
+    box.innerHTML = '<p class="hint warn">' + e.message + '</p>';
+  }
+}
+let searchDebounce = null;
+function debouncedLoadMarket() {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(loadMarket, 450);
+}
+
+function drawMarket() {
+  const box = document.getElementById('market-products');
+  if (!marketProducts.length) { box.innerHTML = '<p class="hint">Aucun produit ne correspond à cette recherche.</p>'; return; }
+  const now = Date.now();
+  box.innerHTML = marketProducts.map(p => {
+    const u = unlocks[p.id];
+    const isUnlocked = u && u.expiry > now;
+    const imgsHtml = p.image1
+      ? `<div><img src="${p.image1}" style="width:100%;height:100%;object-fit:cover"></div><div><img src="${p.image2 || p.image1}" style="width:100%;height:100%;object-fit:cover"></div>`
+      : `<div>🥬</div><div>🍅</div>`;
+    const note = p.producteur_note ? `<span class="note-stars">★ ${p.producteur_note}</span>` : '';
+    return `
+    <div class="product-card">
+      <div class="imgs">${imgsHtml}</div>
+      <div class="body">
+        <h4>${p.nom}</h4>
+        <div class="price">${p.prix ? Number(p.prix).toLocaleString('fr-FR') + ' FCFA' : '—'}</div>
+        <div class="meta">${p.categorie || ''} · ${p.producteur} ${note}${p.quantite ? ' · ' + p.quantite + ' disponible(s)' : ''}</div>
+        ${isUnlocked
+          ? `<div class="contact-unlocked">📞 ${u.telephone}</div>
+             <div class="hint" style="margin:6px 0 4px;">Noter ce vendeur (facultatif) :</div>
+             <div class="rate-stars" id="rate-${p.producteur_id}">
+               ${[1,2,3,4,5].map(n => `<span onclick="setRating(${p.producteur_id},${n})" id="star-${p.producteur_id}-${n}">☆</span>`).join('')}
+             </div>`
+          : `<div class="contact-locked">Contact masqué</div>`}
+        <button class="btn ${isUnlocked ? 'btn-ghost' : 'btn-gold'} small-btn" style="width:100%" ${isUnlocked ? 'disabled' : ''} onclick="openModal(${p.id})">
+          ${isUnlocked ? 'Contact débloqué ✓ (5 min)' : 'Débloquer le contact — ' + Number(p.prix_deblocage_effectif || prixActuel).toLocaleString('fr-FR') + ' FCFA'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function setRating(producteurId, note) {
+  for (let n = 1; n <= 5; n++) {
+    document.getElementById(`star-${producteurId}-${n}`).textContent = n <= note ? '★' : '☆';
+  }
+  try {
+    await apiFetch('/api/producteurs/' + producteurId + '/avis', {
+      method: 'POST', token: session.token, body: { note }
+    });
+    toast("Merci pour votre note !");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function openModal(produitId) {
+  if (session.role !== 'acheteur' && !guestMode) {
+    toast("Connectez-vous en tant qu'acheteur pour débloquer un contact.");
+    showView('compte'); preRole('acheteur'); setAuthMode('login');
+    return;
+  }
+  payTargetId = produitId;
+  chosenMethod = null;
+  const produit = marketProducts.find(p => p.id === produitId);
+  const montant = produit ? Number(produit.prix_deblocage_effectif || prixActuel) : prixActuel;
+  document.getElementById('modal-amount').textContent = montant.toLocaleString('fr-FR') + " FCFA";
+  document.querySelectorAll('.pay-methods button').forEach(b => b.classList.remove('sel'));
+  document.getElementById('pay-num').value = '';
+  const needsGuestFields = session.role !== 'acheteur' && guestMode;
+  document.getElementById('modal-guest-fields').style.display = needsGuestFields ? 'block' : 'none';
+  document.getElementById('pay-modal').classList.add('open');
+}
+function closeModal() { document.getElementById('pay-modal').classList.remove('open'); }
+function selMethod(btn) {
+  document.querySelectorAll('.pay-methods button').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel'); chosenMethod = btn.dataset.m;
+}
+
+async function confirmPay() {
+  if (!chosenMethod) { toast("Choisissez un moyen de paiement."); return; }
+  const numero = document.getElementById('pay-num').value.trim();
+  if (!numero) { toast("Renseignez le numéro de paiement."); return; }
+
+  const estInvite = session.role !== 'acheteur' && guestMode;
+  if (estInvite && !document.getElementById('guest-nom').value.trim()) {
+    toast("Indiquez votre nom pour continuer.");
+    return;
+  }
+
+  try {
+    toast("Paiement en cours...");
+    let deb, token;
+    if (estInvite) {
+      deb = await apiFetch('/api/produits/' + payTargetId + '/debloquer-invite', {
+        method: 'POST',
+        body: {
+          nom: document.getElementById('guest-nom').value.trim(),
+          telephone: numero,
+          methode: chosenMethod, numero_paiement: numero
+        }
+      });
+      token = deb.token;
+      session = { role: 'acheteur', account: { nom: document.getElementById('guest-nom').value.trim() }, token };
+      renderSessionBox();
+    } else {
+      deb = await apiFetch('/api/produits/' + payTargetId + '/debloquer', {
+        method: 'POST', token: session.token, body: { methode: chosenMethod, numero_paiement: numero }
+      });
+      token = session.token;
+    }
+    // Simule la confirmation instantanée de l'opérateur mobile money (à remplacer
+    // par leur vrai webhook une fois le contrat marchand signé).
+    await apiFetch('/api/paiements/webhook', { method: 'POST', body: { reference: deb.reference, statut: 'paye' } });
+    const contact = await apiFetch('/api/produits/' + payTargetId + '/contact', { token });
+
+    unlocks[payTargetId] = {
+      telephone: contact.telephone,
+      expiry: Date.now() + contact.secondes_restantes * 1000
+    };
+    closeModal();
+    drawMarket();
+    toast("Paiement de " + deb.montant.toLocaleString('fr-FR') + " FCFA confirmé via " + chosenMethod + ". Contact visible 5 minutes.");
+    setTimeout(() => { drawMarket(); }, contact.secondes_restantes * 1000 + 500);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+/* --- Admin --- */
+async function adminLogin() {
+  const identifiant = document.getElementById('ad-id').value.trim();
+  const mot_de_passe = document.getElementById('ad-pwd').value;
+  try {
+    const data = await apiFetch('/api/admin/login', { method: 'POST', body: { identifiant, mot_de_passe } });
+    adminToken = data.token;
+    try { localStorage.setItem('agl_admin_token', adminToken); } catch (e) {}
+    document.getElementById('admin-login-box').style.display = 'none';
+    document.getElementById('admin-dash').style.display = 'block';
+    document.getElementById('ad-msg').style.display = 'none';
+    renderAdmin();
+  } catch (e) {
+    document.getElementById('ad-msg').textContent = e.message;
+    document.getElementById('ad-msg').style.display = 'block';
+  }
+}
+function adminLogout() {
+  adminToken = null;
+  try { localStorage.removeItem('agl_admin_token'); } catch (e) {}
+  document.getElementById('admin-dash').style.display = 'none';
+  document.getElementById('admin-login-box').style.display = 'block';
+  document.getElementById('ad-id').value = ''; document.getElementById('ad-pwd').value = '';
+  toast("Déconnecté de l'administration.");
+}
+
+let adminProducteursCache = [];
+let adminComptesCache = [];
+
+async function renderAdmin() {
+  try {
+    const stats = await apiFetch('/api/admin/stats', { token: adminToken });
+    document.getElementById('ad-s-acheteurs').textContent = stats.comptes_acheteurs;
+    document.getElementById('ad-s-producteurs').textContent = stats.comptes_producteurs;
+    document.getElementById('ad-s-visites').textContent = stats.visites;
+    document.getElementById('ad-s-deblocages').textContent = stats.deblocages_payes;
+    document.getElementById('ad-s-revenus').textContent = stats.revenus_fcfa.toLocaleString('fr-FR') + " F";
+    document.getElementById('admin-price').value = stats.prix_deblocage;
+    prixActuel = stats.prix_deblocage;
+  } catch (e) {
+    toast(e.message);
+    if (e.message.includes('expirée') || e.message.includes('invalide')) adminLogout();
+    return;
+  }
+
+  try {
+    adminProducteursCache = await apiFetch('/api/admin/producteurs', { token: adminToken });
+    renderProducteursTable();
+  } catch (e) { /* déjà signalé au-dessus si jeton invalide */ }
+
+  try {
+    adminComptesCache = await apiFetch('/api/admin/comptes', { token: adminToken });
+    renderComptesTable();
+  } catch (e) { /* silencieux */ }
+
+  try {
+    const pay = await apiFetch('/api/admin/paiement-numeros', { token: adminToken });
+    document.getElementById('pay-wave').value = pay.wave_numero || '';
+    document.getElementById('pay-mtn').value = pay.mtn_numero || '';
+    document.getElementById('pay-orange').value = pay.orange_numero || '';
+    document.getElementById('pay-moov').value = pay.moov_numero || '';
+  } catch (e) { /* silencieux */ }
+
+  loadCatPrices();
+  loadRevenusPays();
+  loadCarteComptes();
+  loadAgents();
+}
+
+async function loadRevenusPays() {
+  try {
+    const rows = await apiFetch('/api/admin/revenus-par-pays', { token: adminToken });
+    document.getElementById('admin-revenus-pays').innerHTML = rows.length
+      ? rows.map(r => `
+        <tr>
+          <td>${r.pays}</td>
+          <td>${r.nb_deblocages}</td>
+          <td>${Number(r.revenu).toLocaleString('fr-FR')} FCFA</td>
+        </tr>`).join('')
+      : '<tr><td colspan="3" class="hint">Aucun déblocage payé pour l\'instant.</td></tr>';
+  } catch (e) { /* silencieux */ }
+}
+
+let adminMap = null;
+let mapMarkersLayer = null;
+let mapFilterRole = '';
+
+function setMapFilter(role) {
+  mapFilterRole = role;
+  document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.role === role));
+  loadCarteComptes();
+}
+
+async function loadCarteComptes() {
+  try {
+    const qs = mapFilterRole ? '?role=' + mapFilterRole : '';
+    const comptes = await apiFetch('/api/admin/carte-comptes' + qs, { token: adminToken });
+    drawMap(comptes);
+  } catch (e) { /* silencieux */ }
+}
+
+function drawMap(comptes) {
+  if (!adminMap) {
+    adminMap = L.map('admin-map').setView([9, -3], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors', maxZoom: 18
+    }).addTo(adminMap);
+    mapMarkersLayer = L.layerGroup().addTo(adminMap);
+  }
+  mapMarkersLayer.clearLayers();
+  comptes.forEach(c => {
+    const color = c.role === 'producteur' ? '#1E5A45' : '#E4A73B';
+    L.circleMarker([c.latitude, c.longitude], {
+      radius: 7, fillColor: color, color: '#fff', weight: 1.5, fillOpacity: 0.9
+    }).addTo(mapMarkersLayer).bindPopup(
+      `<strong>${c.nom}</strong><br>${c.role === 'producteur' ? 'Producteur' : 'Acheteur'}<br>${c.ville || ''}${c.pays ? ', ' + c.pays : ''}`
+    );
+  });
+  if (comptes.length) {
+    const bounds = L.latLngBounds(comptes.map(c => [c.latitude, c.longitude]));
+    adminMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+  }
+}
+
+async function geocoderExistants() {
+  const btn = document.getElementById('btn-geocoder');
+  const msg = document.getElementById('geocoder-msg');
+  btn.disabled = true;
+  msg.textContent = "Localisation en cours (peut prendre 10-15 secondes)...";
+  try {
+    const res = await apiFetch('/api/admin/geocoder-existants', { method: 'POST', token: adminToken });
+    msg.textContent = res.message + (res.restants_a_verifier > 0 ? " — reclique si besoin pour continuer." : "");
+    loadCarteComptes();
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+  btn.disabled = false;
+}
+
+async function createAgent() {
+  const nom = document.getElementById('new-agent-nom').value.trim();
+  const telephone = document.getElementById('new-agent-tel').value.trim();
+  const msg = document.getElementById('agent-msg');
+  if (!nom) { msg.textContent = "Le nom de l'agent est requis."; return; }
+  try {
+    const data = await apiFetch('/api/admin/agents', { method: 'POST', token: adminToken, body: { nom, telephone } });
+    msg.textContent = "Agent créé — code à lui donner : " + data.code;
+    document.getElementById('new-agent-nom').value = '';
+    document.getElementById('new-agent-tel').value = '';
+    loadAgents();
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+async function loadAgents() {
+  try {
+    const agents = await apiFetch('/api/admin/agents', { token: adminToken });
+    document.getElementById('admin-agents').innerHTML = agents.length
+      ? agents.map(a => `
+        <tr>
+          <td>${a.nom}</td>
+          <td class="mono">${a.code}</td>
+          <td>${a.nb_producteurs} prod. / ${a.nb_acheteurs} ach.</td>
+          <td>${Number(a.revenu_genere).toLocaleString('fr-FR')} FCFA</td>
+          <td>${Number(a.commission_totale).toLocaleString('fr-FR')} FCFA</td>
+          <td>${Number(a.total_paye).toLocaleString('fr-FR')} FCFA</td>
+          <td><strong>${Number(a.reste_a_payer).toLocaleString('fr-FR')} FCFA</strong></td>
+          <td><button class="btn btn-gold small-btn" ${a.reste_a_payer <= 0 ? 'disabled' : ''} onclick="payerAgent(${a.id})">Payer</button></td>
+        </tr>`).join('')
+      : '<tr><td colspan="8" class="hint">Aucun agent créé pour l\'instant.</td></tr>';
+  } catch (e) { /* silencieux */ }
+}
+
+async function payerAgent(id) {
+  try {
+    const res = await apiFetch('/api/admin/agents/' + id + '/payer', { method: 'POST', token: adminToken });
+    toast("Paiement de " + res.montant_paye.toLocaleString('fr-FR') + " FCFA enregistré.");
+    loadAgents();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function renderProducteursTable() {
+  const q = document.getElementById('admin-search-producteurs').value.trim().toLowerCase();
+  const filtered = adminProducteursCache.filter(p =>
+    !q || p.nom.toLowerCase().includes(q) || (p.ville || '').toLowerCase().includes(q)
+  );
+  document.getElementById('admin-producers').innerHTML = filtered.map(p => `
+    <tr>
+      <td>${p.nom}</td>
+      <td>${p.ville || '—'}</td>
+      <td class="note-stars">★ ${p.note}</td>
+      <td><span class="pill ${p.statut === 'actif' ? 'ok' : 'susp'}">${p.statut === 'actif' ? 'Actif' : 'Suspendu'}</span></td>
+      <td><button class="btn ${p.statut === 'actif' ? 'btn-outline-danger' : 'btn-primary'} small-btn" onclick="toggleSuspend(${p.id}, '${p.statut}')">${p.statut === 'actif' ? 'Suspendre' : 'Réactiver'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="hint">Aucun résultat.</td></tr>';
+}
+
+function renderComptesTable() {
+  const q = document.getElementById('admin-search-comptes').value.trim().toLowerCase();
+  const filtered = adminComptesCache.filter(c =>
+    !q || c.nom.toLowerCase().includes(q) || c.identifiant.toLowerCase().includes(q) || (c.ville || '').toLowerCase().includes(q)
+  );
+  document.getElementById('admin-comptes').innerHTML = filtered.map(c => `
+    <tr>
+      <td>${c.nom}</td>
+      <td>${c.role === 'producteur' ? 'Producteur' : 'Acheteur'}</td>
+      <td class="mono">${c.identifiant}</td>
+      <td>${c.ville || '—'}</td>
+      <td><span class="pill ${c.statut === 'actif' ? 'ok' : 'susp'}">${c.statut === 'actif' ? 'Actif' : 'Suspendu'}</span></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="hint">Aucun résultat.</td></tr>';
+}
+
+let TOUTES_CATEGORIES = ['Cacao', 'Café', 'Coton', 'Anacarde', 'Hévéa', 'Légumes', 'Fruits', 'Céréales', 'Tubercules', 'Élevage'];
+try {
+  const savedCats = JSON.parse(localStorage.getItem('agl_custom_cats') || '[]');
+  savedCats.forEach(c => { if (!TOUTES_CATEGORIES.includes(c)) TOUTES_CATEGORIES.push(c); });
+} catch (e) { /* stockage indisponible */ }
+function persistCustomCats() {
+  try { localStorage.setItem('agl_custom_cats', JSON.stringify(TOUTES_CATEGORIES)); } catch (e) {}
+}
+function addCatOption() {
+  const name = document.getElementById('new-cat-name').value.trim();
+  if (!name) { toast("Entrez un nom de culture."); return; }
+  if (!TOUTES_CATEGORIES.includes(name)) {
+    TOUTES_CATEGORIES.push(name);
+    persistCustomCats();
+  }
+  document.getElementById('new-cat-name').value = '';
+  renderCatChecks();
+  toast(name + " ajouté à la liste — coche-la puis indique un prix.");
+}
+function removeCatOption(cat) {
+  TOUTES_CATEGORIES = TOUTES_CATEGORIES.filter(c => c !== cat);
+  persistCustomCats();
+  if (catPricesCache.some(p => p.categorie === cat)) {
+    apiFetch('/api/admin/prix-categories/' + encodeURIComponent(cat), { method: 'DELETE', token: adminToken })
+      .then(() => loadCatPrices()).catch(e => toast(e.message));
+  } else {
+    renderCatChecks();
+  }
+}
+let catPricesCache = [];
+
+async function loadCatPrices() {
+  try {
+    catPricesCache = await apiFetch('/api/admin/prix-categories', { token: adminToken });
+    renderCatChecks();
+    renderCatPricesTable();
+  } catch (e) { /* silencieux */ }
+}
+
+function renderCatChecks() {
+  catPricesCache.forEach(p => { if (!TOUTES_CATEGORIES.includes(p.categorie)) TOUTES_CATEGORIES.push(p.categorie); });
+  const customSet = new Set(catPricesCache.map(p => p.categorie));
+  document.getElementById('cat-price-checks').innerHTML = TOUTES_CATEGORIES.map(cat => `
+    <span style="display:flex;align-items:center;gap:6px;background:var(--sky);border:1px solid var(--line);border-radius:8px;padding:7px 8px 7px 12px;font-size:13.5px;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" class="cat-check" value="${cat}" ${customSet.has(cat) ? 'checked' : ''}> ${cat}
+      </label>
+      <button type="button" onclick="removeCatOption('${cat.replace(/'/g, "\\'")}')" title="Retirer cette culture de la liste" style="background:none;border:none;color:var(--hibiscus);font-weight:700;cursor:pointer;padding:0 2px;font-size:15px;">×</button>
+    </span>`).join('');
+}
+
+function renderCatPricesTable() {
+  document.getElementById('admin-cat-prices').innerHTML = catPricesCache.length
+    ? catPricesCache.map(p => `
+      <tr>
+        <td>${p.categorie}</td>
+        <td>${Number(p.prix).toLocaleString('fr-FR')} FCFA</td>
+      </tr>`).join('')
+    : '<tr><td colspan="2" class="hint">Aucun prix spécifique défini — toutes les cultures utilisent le prix standard.</td></tr>';
+}
+
+async function applyCatPrices() {
+  const msg = document.getElementById('cat-price-msg');
+  const prixInput = document.getElementById('cat-price-value').value;
+  const prix = Number(prixInput);
+  const prixValide = prixInput !== '' && prix > 0;
+  const checks = Array.from(document.querySelectorAll('.cat-check'));
+  const cochees = checks.filter(c => c.checked).map(c => c.value);
+  const decochees = checks.filter(c => !c.checked).map(c => c.value);
+  const etaientPersonnalisees = new Set(catPricesCache.map(p => p.categorie));
+  const nouvelles = cochees.filter(c => !etaientPersonnalisees.has(c));
+
+  if (nouvelles.length && !prixValide) {
+    msg.textContent = "Entrez un montant pour les nouvelles cultures cochées : " + nouvelles.join(', ');
+    return;
+  }
+
+  try {
+    if (prixValide) {
+      for (const cat of cochees) {
+        await apiFetch('/api/admin/prix-categories', { method: 'PUT', token: adminToken, body: { categorie: cat, prix } });
+      }
+    }
+    for (const cat of decochees) {
+      if (etaientPersonnalisees.has(cat)) {
+        await apiFetch('/api/admin/prix-categories/' + encodeURIComponent(cat), { method: 'DELETE', token: adminToken });
+      }
+    }
+    msg.textContent = "Prix mis à jour.";
+    document.getElementById('cat-price-value').value = '';
+    setTimeout(() => msg.textContent = '', 2500);
+    loadCatPrices();
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+async function toggleSuspend(userId, statutActuel) {
+  const nouveauStatut = statutActuel === 'actif' ? 'suspendu' : 'actif';
+  try {
+    await apiFetch('/api/admin/producteurs/' + userId + '/statut', {
+      method: 'PATCH', token: adminToken, body: { statut: nouveauStatut }
+    });
+    toast("Statut mis à jour.");
+    renderAdmin();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function savePrice() {
+  const val = Number(document.getElementById('admin-price').value);
+  const msg = document.getElementById('price-msg');
+  if (!val || val <= 0) { msg.textContent = "Entrez un montant valide."; return; }
+  try {
+    await apiFetch('/api/admin/prix-deblocage', { method: 'PUT', token: adminToken, body: { prix_deblocage: val } });
+    prixActuel = val;
+    updatePriceDisplays();
+    msg.textContent = "Nouveau prix enregistré : " + val.toLocaleString('fr-FR') + " FCFA.";
+    setTimeout(() => msg.textContent = '', 2500);
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+async function savePay() {
+  const msg = document.getElementById('pay-msg');
+  try {
+    await apiFetch('/api/admin/paiement-numeros', {
+      method: 'PUT', token: adminToken,
+      body: {
+        wave: document.getElementById('pay-wave').value,
+        mtn: document.getElementById('pay-mtn').value,
+        orange: document.getElementById('pay-orange').value,
+        moov: document.getElementById('pay-moov').value,
+      }
+    });
+    msg.textContent = "Numéros enregistrés.";
+    setTimeout(() => msg.textContent = '', 2500);
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+async function updateCreds() {
+  const nid = document.getElementById('new-id').value.trim();
+  const npwd = document.getElementById('new-pwd').value;
+  const msg = document.getElementById('cred-msg');
+  if (!nid || !npwd) { msg.textContent = "Renseignez les deux champs."; return; }
+  try {
+    await apiFetch('/api/admin/identifiants', {
+      method: 'PUT', token: adminToken,
+      body: { nouvel_identifiant: nid, nouveau_mot_de_passe: npwd }
+    });
+    msg.textContent = "Identifiants mis à jour.";
+    document.getElementById('new-id').value = ''; document.getElementById('new-pwd').value = '';
+    setTimeout(() => msg.textContent = '', 2500);
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+/* Si une session admin ou utilisateur était déjà sauvegardée, on l'affiche direct */
+if (adminToken) {
+  document.getElementById('admin-login-box').style.display = 'none';
+  document.getElementById('admin-dash').style.display = 'block';
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+
+/* --- Assistant AgriLineShop (réponses automatiques, sans IA) --- */
+const CHAT_FAQ = [
+  { q: "Comment créer un compte ?", a: "Va dans l'onglet <strong>Mon compte</strong>, choisis <strong>Créer un compte</strong>, puis <strong>Producteur</strong> ou <strong>Acheteur</strong>. Remplis le formulaire avec un identifiant et un mot de passe de ton choix." },
+  { q: "Comment me connecter ?", a: "Va dans l'onglet <strong>Mon compte</strong>, laisse <strong>Se connecter</strong> sélectionné, choisis ton profil (Producteur ou Acheteur), puis entre ton identifiant et ton mot de passe." },
+  { q: "Comment publier un produit ?", a: "Connecte-toi en tant que <strong>producteur</strong>, va dans <strong>Espace producteur</strong>, remplis les informations du produit, et ajoute <strong>au moins 2 photos</strong> — c'est obligatoire pour publier." },
+  { q: "Pourquoi je dois payer pour voir le contact ?", a: "C'est le fonctionnement du site : le contact d'un producteur reste caché tant qu'un acheteur n'a pas payé le déblocage. Ça permet de financer le site et évite les abus." },
+  { q: "Combien coûte le déblocage d'un contact ?", a: "Le prix peut changer, il est décidé par l'administrateur. Le montant exact s'affiche directement sur le bouton \"Débloquer le contact\" de chaque produit." },
+  { q: "Le contact reste débloqué combien de temps ?", a: "5 minutes après le paiement. Passé ce délai, il faut payer à nouveau pour le revoir." },
+  { q: "J'ai oublié mon mot de passe, que faire ?", a: "Pour l'instant, il n'y a pas de récupération automatique. Contacte l'administrateur du site pour qu'il t'aide." },
+  { q: "Le site/l'application est-il gratuit ?", a: "Oui, créer un compte, publier des produits et parcourir le marché est entièrement gratuit. Seul le déblocage d'un contact est payant, pour l'acheteur uniquement." },
+];
+
+function toggleChat() {
+  const panel = document.getElementById('chat-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open') && !document.getElementById('chat-body').dataset.started) {
+    document.getElementById('chat-body').dataset.started = '1';
+    addChatMsg('bot', "Bonjour 👋 Je suis l'assistant AgriLineShop. Je réponds automatiquement aux questions les plus fréquentes — choisis-en une ci-dessous, ou écris ta question.");
+    showChatQuestions();
+  }
+}
+
+function addChatMsg(who, html) {
+  const body = document.getElementById('chat-body');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + who;
+  div.innerHTML = html;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+  return div;
+}
+
+function showChatQuestions() {
+  const body = document.getElementById('chat-body');
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-quick';
+  CHAT_FAQ.forEach((item, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = item.q;
+    btn.onclick = () => askChatQuestion(i);
+    wrap.appendChild(btn);
+  });
+  body.appendChild(wrap);
+  body.scrollTop = body.scrollHeight;
+}
+
+function askChatQuestion(i) {
+  addChatMsg('user', CHAT_FAQ[i].q);
+  addChatMsg('bot', CHAT_FAQ[i].a);
+  showChatQuestions();
+}
+
+function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  addChatMsg('user', text);
+  input.value = '';
+
+  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  let best = null, bestScore = 0;
+  CHAT_FAQ.forEach(item => {
+    const qWords = item.q.toLowerCase();
+    const score = words.filter(w => qWords.includes(w)).length;
+    if (score > bestScore) { bestScore = score; best = item; }
+  });
+
+  if (best && bestScore > 0) {
+    addChatMsg('bot', best.a);
+  } else {
+    addChatMsg('bot', "Je ne suis pas sûr de comprendre 🤔 Voici les questions auxquelles je sais répondre :");
+  }
+  showChatQuestions();
+}
+
+/* --- Lien direct depuis les réseaux sociaux (Facebook / TikTok) --- */
+const urlParams = new URLSearchParams(window.location.search);
+const produitCible = urlParams.get('produit');
+if (produitCible) {
+  guestMode = true;
+  showView('acheteur');
+}
+</script>
+</body>
+</html>
