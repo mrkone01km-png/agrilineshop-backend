@@ -9,12 +9,14 @@ point de départ ; en production on séparerait les routes en blueprints
 (auth, produits, admin) et on passerait sur PostgreSQL + un vrai service
 de stockage d'images (S3, Cloudinary...).
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import os
 import datetime
 import time
+import csv
+import io
 import requests
 
 import db
@@ -722,15 +724,15 @@ def liste_agents():
 
     resultat = []
     for a in agents:
-        # Revenu généré par les déblocages liés aux producteurs OU aux acheteurs que cet agent a recrutés.
+        # Revenu généré uniquement par les ventes des producteurs que cet agent a recrutés
+        # (l'acheteur, lui, n'a plus besoin de compte : la commission ne dépend que du producteur).
         row = conn.execute(
             """SELECT COALESCE(SUM(cu.montant), 0) AS total
                FROM contact_unlocks cu
                JOIN products p ON p.id = cu.product_id
                JOIN users prod ON prod.id = p.producteur_id
-               JOIN users ach ON ach.id = cu.acheteur_id
-               WHERE cu.statut = 'paye' AND (prod.agent_id = %s OR ach.agent_id = %s)""",
-            (a["id"], a["id"]),
+               WHERE cu.statut = 'paye' AND prod.agent_id = %s""",
+            (a["id"],),
         ).fetchone()
         revenu_genere = row["total"] or 0
         nb_producteurs = conn.execute(
@@ -768,9 +770,8 @@ def payer_agent(agent_id):
            FROM contact_unlocks cu
            JOIN products p ON p.id = cu.product_id
            JOIN users prod ON prod.id = p.producteur_id
-           JOIN users ach ON ach.id = cu.acheteur_id
-           WHERE cu.statut = 'paye' AND (prod.agent_id = %s OR ach.agent_id = %s)""",
-        (agent_id, agent_id),
+           WHERE cu.statut = 'paye' AND prod.agent_id = %s""",
+        (agent_id,),
     ).fetchone()
     revenu_genere = row["total"] or 0
     commission_totale = round(revenu_genere * TAUX_COMMISSION_AGENT)
@@ -817,12 +818,21 @@ def revenus_par_pays():
 @require_role("admin")
 def carte_comptes():
     role = request.args.get("role", "").strip()
+    categories_param = request.args.get("categories", "").strip()
     sql = """SELECT nom, role, ville, pays, latitude, longitude
              FROM users WHERE latitude IS NOT NULL AND longitude IS NOT NULL"""
     params = []
     if role in ("producteur", "acheteur"):
         sql += " AND role = %s"
         params.append(role)
+    if categories_param:
+        cats = [c.strip() for c in categories_param.split(",") if c.strip()]
+        if cats:
+            placeholders = ",".join(["%s"] * len(cats))
+            sql += f""" AND role = 'producteur' AND EXISTS (
+                SELECT 1 FROM products pr WHERE pr.producteur_id = users.id AND pr.categorie IN ({placeholders})
+            )"""
+            params.extend(cats)
     conn = db.get_conn()
     rows = conn.execute(sql, params).fetchall()
     conn.close()
@@ -862,7 +872,7 @@ def liste_comptes():
     # (le nom de connexion) est visible ici.
     conn = db.get_conn()
     rows = conn.execute(
-        "SELECT nom, role, identifiant, pays, ville, statut FROM users ORDER BY role, nom"
+        "SELECT nom, role, identifiant, telephone, pays, ville, statut FROM users ORDER BY role, nom"
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -938,6 +948,127 @@ def seed_demo_data():
         )
         conn.commit()
     conn.close()
+
+
+def csv_response(nom_fichier, entetes, lignes):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(entetes)
+    writer.writerows(lignes)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={nom_fichier}"},
+    )
+
+
+@app.get("/api/admin/export/utilisateurs")
+@require_role("admin")
+def export_utilisateurs():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT nom, role, identifiant, telephone, pays, ville, culture, note, statut, created_at
+           FROM users ORDER BY role, nom"""
+    ).fetchall()
+    conn.close()
+    lignes = [[r["nom"], r["role"], r["identifiant"], r["telephone"], r["pays"], r["ville"],
+               r["culture"], r["note"], r["statut"], r["created_at"]] for r in rows]
+    return csv_response("utilisateurs.csv",
+                         ["Nom", "Rôle", "Identifiant", "Téléphone", "Pays", "Ville", "Culture", "Note", "Statut", "Créé le"],
+                         lignes)
+
+
+@app.get("/api/admin/export/produits")
+@require_role("admin")
+def export_produits():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT p.nom, p.prix, p.quantite, p.categorie, u.nom AS producteur, u.ville, u.pays, p.created_at
+           FROM products p JOIN users u ON u.id = p.producteur_id ORDER BY p.created_at DESC"""
+    ).fetchall()
+    conn.close()
+    lignes = [[r["nom"], r["prix"], r["quantite"], r["categorie"], r["producteur"], r["ville"], r["pays"], r["created_at"]]
+              for r in rows]
+    return csv_response("produits.csv",
+                         ["Produit", "Prix", "Quantité", "Catégorie", "Producteur", "Ville", "Pays", "Publié le"],
+                         lignes)
+
+
+@app.get("/api/admin/export/deblocages")
+@require_role("admin")
+def export_deblocages():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT cu.reference, cu.montant, cu.methode, cu.statut, cu.created_at,
+                  p.nom AS produit, prod.nom AS producteur, ach.nom AS acheteur
+           FROM contact_unlocks cu
+           JOIN products p ON p.id = cu.product_id
+           JOIN users prod ON prod.id = p.producteur_id
+           JOIN users ach ON ach.id = cu.acheteur_id
+           ORDER BY cu.created_at DESC"""
+    ).fetchall()
+    conn.close()
+    lignes = [[r["reference"], r["montant"], r["methode"], r["statut"], r["created_at"],
+               r["produit"], r["producteur"], r["acheteur"]] for r in rows]
+    return csv_response("deblocages.csv",
+                         ["Référence", "Montant", "Moyen de paiement", "Statut", "Date", "Produit", "Producteur", "Acheteur"],
+                         lignes)
+
+
+@app.get("/api/admin/export/agents")
+@require_role("admin")
+def export_agents():
+    conn = db.get_conn()
+    rows = conn.execute("SELECT nom, code, telephone, total_paye, created_at FROM agents ORDER BY nom").fetchall()
+    conn.close()
+    lignes = [[r["nom"], r["code"], r["telephone"], r["total_paye"], r["created_at"]] for r in rows]
+    return csv_response("agents.csv", ["Nom", "Code", "Téléphone", "Total payé", "Créé le"], lignes)
+
+
+# ---------------------------------------------------------------------------
+# Statistiques pour le tableau de bord graphique
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/stats-quotidiennes")
+@require_role("admin")
+def stats_quotidiennes():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT DATE(created_at) AS jour, COALESCE(SUM(montant), 0) AS revenu, COUNT(*) AS nb
+           FROM contact_unlocks WHERE statut = 'paye' AND created_at > NOW() - INTERVAL '30 days'
+           GROUP BY DATE(created_at) ORDER BY jour"""
+    ).fetchall()
+    conn.close()
+    return jsonify([{"jour": str(r["jour"]), "revenu": r["revenu"], "nb": r["nb"]} for r in rows])
+
+
+@app.get("/api/admin/revenus-par-categorie")
+@require_role("admin")
+def revenus_par_categorie():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT COALESCE(p.categorie, 'Non renseigné') AS categorie,
+                  COALESCE(SUM(cu.montant), 0) AS revenu, COUNT(*) AS nb
+           FROM contact_unlocks cu JOIN products p ON p.id = cu.product_id
+           WHERE cu.statut = 'paye'
+           GROUP BY p.categorie ORDER BY revenu DESC"""
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/admin/comptes-par-pays")
+@require_role("admin")
+def comptes_par_pays():
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT COALESCE(pays, 'Non renseigné') AS pays,
+                  COUNT(*) FILTER (WHERE role = 'producteur') AS producteurs,
+                  COUNT(*) FILTER (WHERE role = 'acheteur') AS acheteurs
+           FROM users GROUP BY pays ORDER BY (COUNT(*)) DESC"""
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 if __name__ == "__main__":
