@@ -962,6 +962,31 @@ def csv_response(nom_fichier, entetes, lignes):
     )
 
 
+def xlsx_response(nom_fichier, entetes, lignes):
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(entetes)
+    for ligne in lignes:
+        ws.append([str(v) if v is not None else "" for v in ligne])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        buf.read(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={nom_fichier}"},
+    )
+
+
+def export_response(base_nom, entetes, lignes):
+    """Renvoie un CSV ou un Excel selon le paramètre ?format=xlsx (csv par défaut)."""
+    fmt = request.args.get("format", "csv").strip().lower()
+    if fmt == "xlsx":
+        return xlsx_response(base_nom + ".xlsx", entetes, lignes)
+    return csv_response(base_nom + ".csv", entetes, lignes)
+
+
 @app.get("/api/admin/export/utilisateurs")
 @require_role("admin")
 def export_utilisateurs():
@@ -973,9 +998,9 @@ def export_utilisateurs():
     conn.close()
     lignes = [[r["nom"], r["role"], r["identifiant"], r["telephone"], r["pays"], r["ville"],
                r["culture"], r["note"], r["statut"], r["created_at"]] for r in rows]
-    return csv_response("utilisateurs.csv",
-                         ["Nom", "Rôle", "Identifiant", "Téléphone", "Pays", "Ville", "Culture", "Note", "Statut", "Créé le"],
-                         lignes)
+    return export_response("utilisateurs",
+                            ["Nom", "Rôle", "Identifiant", "Téléphone", "Pays", "Ville", "Culture", "Note", "Statut", "Créé le"],
+                            lignes)
 
 
 @app.get("/api/admin/export/produits")
@@ -983,15 +1008,18 @@ def export_utilisateurs():
 def export_produits():
     conn = db.get_conn()
     rows = conn.execute(
-        """SELECT p.nom, p.prix, p.quantite, p.categorie, u.nom AS producteur, u.ville, u.pays, p.created_at
+        """SELECT p.nom, p.prix, p.quantite, p.categorie, u.nom AS producteur, u.telephone AS producteur_telephone,
+                  u.ville, u.pays, u.latitude, u.longitude, p.created_at
            FROM products p JOIN users u ON u.id = p.producteur_id ORDER BY p.created_at DESC"""
     ).fetchall()
     conn.close()
-    lignes = [[r["nom"], r["prix"], r["quantite"], r["categorie"], r["producteur"], r["ville"], r["pays"], r["created_at"]]
+    lignes = [[r["nom"], r["prix"], r["quantite"], r["categorie"], r["producteur"], r["producteur_telephone"],
+               r["ville"], r["pays"], r["latitude"], r["longitude"], r["created_at"]]
               for r in rows]
-    return csv_response("produits.csv",
-                         ["Produit", "Prix", "Quantité", "Catégorie", "Producteur", "Ville", "Pays", "Publié le"],
-                         lignes)
+    return export_response("produits",
+                            ["Produit", "Prix", "Quantité", "Catégorie", "Producteur", "Téléphone producteur",
+                             "Ville", "Pays", "Latitude", "Longitude", "Publié le"],
+                            lignes)
 
 
 @app.get("/api/admin/export/deblocages")
@@ -1010,9 +1038,9 @@ def export_deblocages():
     conn.close()
     lignes = [[r["reference"], r["montant"], r["methode"], r["statut"], r["created_at"],
                r["produit"], r["producteur"], r["acheteur"]] for r in rows]
-    return csv_response("deblocages.csv",
-                         ["Référence", "Montant", "Moyen de paiement", "Statut", "Date", "Produit", "Producteur", "Acheteur"],
-                         lignes)
+    return export_response("deblocages",
+                            ["Référence", "Montant", "Moyen de paiement", "Statut", "Date", "Produit", "Producteur", "Acheteur"],
+                            lignes)
 
 
 @app.get("/api/admin/export/agents")
@@ -1022,7 +1050,7 @@ def export_agents():
     rows = conn.execute("SELECT nom, code, telephone, total_paye, created_at FROM agents ORDER BY nom").fetchall()
     conn.close()
     lignes = [[r["nom"], r["code"], r["telephone"], r["total_paye"], r["created_at"]] for r in rows]
-    return csv_response("agents.csv", ["Nom", "Code", "Téléphone", "Total payé", "Créé le"], lignes)
+    return export_response("agents", ["Nom", "Code", "Téléphone", "Total payé", "Créé le"], lignes)
 
 
 # ---------------------------------------------------------------------------
