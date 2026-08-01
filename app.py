@@ -1006,7 +1006,8 @@ def export_analyse_complete():
         """SELECT cu.created_at, cu.reference, cu.montant, cu.methode, cu.statut,
                   p.nom AS produit, p.categorie,
                   prod.nom AS producteur, prod.ville AS producteur_ville, prod.pays AS producteur_pays,
-                  prod.telephone AS producteur_telephone,
+                  prod.telephone AS producteur_telephone, prod.latitude AS producteur_latitude,
+                  prod.longitude AS producteur_longitude,
                   ach.nom AS acheteur, ach.telephone AS acheteur_telephone,
                   ag.nom AS agent_recruteur
            FROM contact_unlocks cu
@@ -1019,7 +1020,8 @@ def export_analyse_complete():
     ).fetchall()
 
     producteurs = conn.execute(
-        """SELECT prod.nom, prod.ville, prod.pays, prod.telephone, prod.culture, prod.statut,
+        """SELECT prod.nom, prod.ville, prod.pays, prod.telephone, prod.latitude, prod.longitude,
+                  prod.culture, prod.statut,
                   COUNT(DISTINCT p.id) AS nb_produits,
                   COUNT(DISTINCT cu.acheteur_id) FILTER (WHERE cu.statut = 'paye') AS nb_clients_distincts,
                   COALESCE(SUM(cu.montant) FILTER (WHERE cu.statut = 'paye'), 0) AS revenu_genere,
@@ -1029,7 +1031,8 @@ def export_analyse_complete():
            LEFT JOIN contact_unlocks cu ON cu.product_id = p.id
            LEFT JOIN agents ag ON ag.id = prod.agent_id
            WHERE prod.role = 'producteur'
-           GROUP BY prod.id, prod.nom, prod.ville, prod.pays, prod.telephone, prod.culture, prod.statut, ag.nom
+           GROUP BY prod.id, prod.nom, prod.ville, prod.pays, prod.telephone, prod.latitude, prod.longitude,
+                    prod.culture, prod.statut, ag.nom
            ORDER BY revenu_genere DESC"""
     ).fetchall()
 
@@ -1054,18 +1057,21 @@ def export_analyse_complete():
     ws1.title = "Transactions"
     ws1.append(["Date", "Référence", "Montant", "Méthode de paiement", "Statut", "Produit", "Culture",
                 "Producteur", "Ville producteur", "Pays producteur", "Téléphone producteur",
+                "Latitude producteur", "Longitude producteur",
                 "Acheteur", "Téléphone acheteur", "Agent recruteur"])
     for r in transactions:
         ws1.append([str(r["created_at"]), r["reference"], r["montant"], r["methode"], r["statut"],
                     r["produit"], r["categorie"], r["producteur"], r["producteur_ville"], r["producteur_pays"],
-                    r["producteur_telephone"], r["acheteur"], r["acheteur_telephone"], r["agent_recruteur"] or ""])
+                    r["producteur_telephone"], r["producteur_latitude"], r["producteur_longitude"],
+                    r["acheteur"], r["acheteur_telephone"], r["agent_recruteur"] or ""])
 
     ws2 = wb.create_sheet("Producteurs")
-    ws2.append(["Nom", "Ville", "Pays", "Téléphone", "Culture", "Statut", "Nb produits",
+    ws2.append(["Nom", "Ville", "Pays", "Téléphone", "Latitude", "Longitude", "Culture", "Statut", "Nb produits",
                 "Nb clients distincts", "Revenu généré", "Agent recruteur"])
     for r in producteurs:
-        ws2.append([r["nom"], r["ville"], r["pays"], r["telephone"], r["culture"], r["statut"],
-                    r["nb_produits"], r["nb_clients_distincts"], r["revenu_genere"], r["agent_recruteur"] or ""])
+        ws2.append([r["nom"], r["ville"], r["pays"], r["telephone"], r["latitude"], r["longitude"],
+                    r["culture"], r["statut"], r["nb_produits"], r["nb_clients_distincts"],
+                    r["revenu_genere"], r["agent_recruteur"] or ""])
 
     ws3 = wb.create_sheet("Produits")
     ws3.append(["Produit", "Catégorie", "Prix", "Quantité", "Producteur", "Ville", "Pays",
@@ -1094,14 +1100,15 @@ def export_analyse_complete():
 def export_utilisateurs():
     conn = db.get_conn()
     rows = conn.execute(
-        """SELECT nom, role, identifiant, telephone, pays, ville, culture, note, statut, created_at
+        """SELECT nom, role, identifiant, telephone, pays, ville, culture, note, statut, latitude, longitude, created_at
            FROM users ORDER BY role, nom"""
     ).fetchall()
     conn.close()
     lignes = [[r["nom"], r["role"], r["identifiant"], r["telephone"], r["pays"], r["ville"],
-               r["culture"], r["note"], r["statut"], r["created_at"]] for r in rows]
+               r["culture"], r["note"], r["statut"], r["latitude"], r["longitude"], r["created_at"]] for r in rows]
     return export_response("utilisateurs",
-                            ["Nom", "Rôle", "Identifiant", "Téléphone", "Pays", "Ville", "Culture", "Note", "Statut", "Créé le"],
+                            ["Nom", "Rôle", "Identifiant", "Téléphone", "Pays", "Ville", "Culture", "Note",
+                             "Statut", "Latitude", "Longitude", "Créé le"],
                             lignes)
 
 
@@ -1130,7 +1137,9 @@ def export_deblocages():
     conn = db.get_conn()
     rows = conn.execute(
         """SELECT cu.reference, cu.montant, cu.methode, cu.statut, cu.created_at,
-                  p.nom AS produit, prod.nom AS producteur, ach.nom AS acheteur
+                  p.nom AS produit, prod.nom AS producteur, prod.telephone AS producteur_telephone,
+                  prod.latitude AS producteur_latitude, prod.longitude AS producteur_longitude,
+                  ach.nom AS acheteur, ach.telephone AS acheteur_telephone
            FROM contact_unlocks cu
            JOIN products p ON p.id = cu.product_id
            JOIN users prod ON prod.id = p.producteur_id
@@ -1139,9 +1148,13 @@ def export_deblocages():
     ).fetchall()
     conn.close()
     lignes = [[r["reference"], r["montant"], r["methode"], r["statut"], r["created_at"],
-               r["produit"], r["producteur"], r["acheteur"]] for r in rows]
+               r["produit"], r["producteur"], r["producteur_telephone"],
+               r["producteur_latitude"], r["producteur_longitude"],
+               r["acheteur"], r["acheteur_telephone"]] for r in rows]
     return export_response("deblocages",
-                            ["Référence", "Montant", "Moyen de paiement", "Statut", "Date", "Produit", "Producteur", "Acheteur"],
+                            ["Référence", "Montant", "Moyen de paiement", "Statut", "Date", "Produit",
+                             "Producteur", "Téléphone producteur", "Latitude producteur", "Longitude producteur",
+                             "Acheteur", "Téléphone acheteur"],
                             lignes)
 
 
