@@ -987,6 +987,108 @@ def export_response(base_nom, entetes, lignes):
     return csv_response(base_nom + ".csv", entetes, lignes)
 
 
+@app.get("/api/admin/export/analyse-complete")
+@require_role("admin")
+def export_analyse_complete():
+    """
+    Classeur Excel unique, pensé pour l'analyse (tableaux croisés dynamiques).
+    - "Transactions" : une ligne par déblocage payé, avec TOUTES les dimensions
+      à plat (producteur, acheteur, produit, culture, pays, ville, méthode de
+      paiement, agent...) — c'est cette feuille qu'on utilise pour croiser
+      n'importe quelle information dans Excel (Insertion > Tableau croisé dynamique).
+    - "Producteurs", "Produits", "Agents" : une ligne par élément, avec les
+      chiffres déjà calculés (revenu généré, nombre de clients distincts...).
+    """
+    from openpyxl import Workbook
+    conn = db.get_conn()
+
+    transactions = conn.execute(
+        """SELECT cu.created_at, cu.reference, cu.montant, cu.methode, cu.statut,
+                  p.nom AS produit, p.categorie,
+                  prod.nom AS producteur, prod.ville AS producteur_ville, prod.pays AS producteur_pays,
+                  prod.telephone AS producteur_telephone,
+                  ach.nom AS acheteur, ach.telephone AS acheteur_telephone,
+                  ag.nom AS agent_recruteur
+           FROM contact_unlocks cu
+           JOIN products p ON p.id = cu.product_id
+           JOIN users prod ON prod.id = p.producteur_id
+           JOIN users ach ON ach.id = cu.acheteur_id
+           LEFT JOIN agents ag ON ag.id = prod.agent_id
+           WHERE cu.statut = 'paye'
+           ORDER BY cu.created_at DESC"""
+    ).fetchall()
+
+    producteurs = conn.execute(
+        """SELECT prod.nom, prod.ville, prod.pays, prod.telephone, prod.culture, prod.statut,
+                  COUNT(DISTINCT p.id) AS nb_produits,
+                  COUNT(DISTINCT cu.acheteur_id) FILTER (WHERE cu.statut = 'paye') AS nb_clients_distincts,
+                  COALESCE(SUM(cu.montant) FILTER (WHERE cu.statut = 'paye'), 0) AS revenu_genere,
+                  ag.nom AS agent_recruteur
+           FROM users prod
+           LEFT JOIN products p ON p.producteur_id = prod.id
+           LEFT JOIN contact_unlocks cu ON cu.product_id = p.id
+           LEFT JOIN agents ag ON ag.id = prod.agent_id
+           WHERE prod.role = 'producteur'
+           GROUP BY prod.id, prod.nom, prod.ville, prod.pays, prod.telephone, prod.culture, prod.statut, ag.nom
+           ORDER BY revenu_genere DESC"""
+    ).fetchall()
+
+    produits = conn.execute(
+        """SELECT p.nom, p.categorie, p.prix, p.quantite, prod.nom AS producteur, prod.ville, prod.pays,
+                  prod.latitude, prod.longitude,
+                  COUNT(cu.id) FILTER (WHERE cu.statut = 'paye') AS nb_deblocages,
+                  COALESCE(SUM(cu.montant) FILTER (WHERE cu.statut = 'paye'), 0) AS revenu_genere
+           FROM products p
+           JOIN users prod ON prod.id = p.producteur_id
+           LEFT JOIN contact_unlocks cu ON cu.product_id = p.id
+           GROUP BY p.id, p.nom, p.categorie, p.prix, p.quantite, prod.nom, prod.ville, prod.pays, prod.latitude, prod.longitude
+           ORDER BY revenu_genere DESC"""
+    ).fetchall()
+
+    agents = conn.execute("SELECT nom, code, telephone, total_paye FROM agents ORDER BY nom").fetchall()
+    conn.close()
+
+    wb = Workbook()
+
+    ws1 = wb.active
+    ws1.title = "Transactions"
+    ws1.append(["Date", "Référence", "Montant", "Méthode de paiement", "Statut", "Produit", "Culture",
+                "Producteur", "Ville producteur", "Pays producteur", "Téléphone producteur",
+                "Acheteur", "Téléphone acheteur", "Agent recruteur"])
+    for r in transactions:
+        ws1.append([str(r["created_at"]), r["reference"], r["montant"], r["methode"], r["statut"],
+                    r["produit"], r["categorie"], r["producteur"], r["producteur_ville"], r["producteur_pays"],
+                    r["producteur_telephone"], r["acheteur"], r["acheteur_telephone"], r["agent_recruteur"] or ""])
+
+    ws2 = wb.create_sheet("Producteurs")
+    ws2.append(["Nom", "Ville", "Pays", "Téléphone", "Culture", "Statut", "Nb produits",
+                "Nb clients distincts", "Revenu généré", "Agent recruteur"])
+    for r in producteurs:
+        ws2.append([r["nom"], r["ville"], r["pays"], r["telephone"], r["culture"], r["statut"],
+                    r["nb_produits"], r["nb_clients_distincts"], r["revenu_genere"], r["agent_recruteur"] or ""])
+
+    ws3 = wb.create_sheet("Produits")
+    ws3.append(["Produit", "Catégorie", "Prix", "Quantité", "Producteur", "Ville", "Pays",
+                "Latitude", "Longitude", "Nb déblocages", "Revenu généré"])
+    for r in produits:
+        ws3.append([r["nom"], r["categorie"], r["prix"], r["quantite"], r["producteur"], r["ville"], r["pays"],
+                    r["latitude"], r["longitude"], r["nb_deblocages"], r["revenu_genere"]])
+
+    ws4 = wb.create_sheet("Agents")
+    ws4.append(["Nom", "Code", "Téléphone", "Total payé"])
+    for r in agents:
+        ws4.append([r["nom"], r["code"], r["telephone"], r["total_paye"]])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        buf.read(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=agrilineshop-analyse-complete.xlsx"},
+    )
+
+
 @app.get("/api/admin/export/utilisateurs")
 @require_role("admin")
 def export_utilisateurs():
